@@ -284,6 +284,15 @@ window.initApp = async function() {
   if (typeof window.renderDashboard === 'function') window.renderDashboard();
   if (typeof window.filterInventory === 'function') window.filterInventory();
   if (typeof window.updateBottomNavBadge === 'function') window.updateBottomNavBadge();
+
+  // Check and seed professional services catalog if empty
+  if (typeof window.checkAndSeedServices === 'function') {
+    try {
+      await window.checkAndSeedServices();
+    } catch(e) {
+      console.error('[InitApp] Seeding professional services failed:', e);
+    }
+  }
 };
 
 

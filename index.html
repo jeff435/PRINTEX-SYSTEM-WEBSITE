@@ -803,6 +803,7 @@ input[title]:hover::before,select[title]:hover::before{display:none}
   <div class="nav-item" onclick="showPage('invoices',this)"><i class="fa fa-file-invoice-dollar"></i> Invoices</div>
   <div class="nav-item" onclick="showPage('quotations',this)"><i class="fa fa-file-contract"></i> Quotations</div>
   <div class="nav-item" onclick="showPage('createInvoice',this)"><i class="fa fa-plus-circle"></i> New Invoice / Quote</div>
+  <div class="nav-item" onclick="showPage('services',this)"><i class="fa fa-screwdriver-wrench"></i> Services</div>
   <div class="nav-item" onclick="showPage('freelance',this)"><i class="fa fa-truck"></i> Deliveries & Riders</div>
   <div class="nav-section">Tools</div>
   <div class="nav-item" onclick="showPage('reports',this)"><i class="fa fa-chart-bar"></i> Reports</div>
@@ -1337,6 +1338,11 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <!-- Content populated dynamically by freelance.js -->
     </div>
 
+    <!-- SERVICES -->
+    <div class="page fade-in" id="page-services">
+      <!-- Content populated dynamically by services.js -->
+    </div>
+
   </div><!-- /content -->
 </div><!-- /main -->
 <!-- MOBILE BOTTOM NAV -->
@@ -1587,6 +1593,7 @@ input[title]:hover::before,select[title]:hover::before{display:none}
 <script type="module" src="/src/modules/ai.js"></script>
 <script type="module" src="/src/modules/payments.js"></script>
 <script type="module" src="/src/modules/freelance.js"></script>
+<script type="module" src="/src/modules/services.js"></script>
 <script type="module" src="/src/modules/sync.js"></script>
 <script type="module" src="/src/modules/delivery.js"></script>
 <script type="module" src="/src/modules/bulk_import.js"></script>

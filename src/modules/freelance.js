@@ -215,7 +215,7 @@ const renderNewDeliveryForm = () => {
 
 window.autoFillDeliveryForm = function(invId) {
   if (!invId) return;
-  const inv = window.invoices.find(i => i.id === invId);
+  const inv = window.invoices.find(i => String(i.id) === String(invId));
   if (!inv) return;
 
   const cInp = document.getElementById('dfCustomer');

@@ -89,47 +89,61 @@ window.openDB = function() {
 };
 
 window.dbGet = function(store, key) {
-  const user = window.fAuth ? window.fAuth.currentUser : null;
-  if (user && window.fDb) {
-    if (key !== undefined) {
-      const docId = String(key);
-      return window.fDb.collection(`users/${user.uid}/${store}`).doc(docId).get()
-        .then(doc => {
-          if (!doc.exists) return null;
-          const data = doc.data();
-          data.id = doc.id;
-          if (store === 'invoices' && typeof data.items === 'string') {
-            try { data.items = JSON.parse(data.items); } catch(e) {}
+  return new Promise((resolve, reject) => {
+    const handleFallback = () => {
+      try {
+        const localData = localStorage.getItem('printex_fallback_' + store);
+        if (localData) {
+          const parsed = JSON.parse(localData);
+          if (key !== undefined) {
+            const item = parsed.find(x => String(store === 'settings' ? x.key : x.id) === String(key));
+            return resolve(item || null);
           }
-          return data;
-        });
-    } else {
-      return window.fDb.collection(`users/${user.uid}/${store}`).get()
-        .then(snapshot => {
-          const docs = [];
-          snapshot.forEach(doc => {
-            const data = doc.data();
-            data.id = doc.id;
-            if (store === 'invoices' && typeof data.items === 'string') {
-              try { data.items = JSON.parse(data.items); } catch(e) {}
-            }
-            docs.push(data);
-          });
-          return docs;
-        });
-    }
-  } else {
-    return new Promise((res, rej) => {
-      if (!window.db) {
-        if (store === 'parts') return res(window.DEFAULT_PARTS || []);
-        return res([]);
+          return resolve(parsed);
+        }
+      } catch (err) {
+        console.warn(`[dbGet Fallback] LocalStorage fallback read failed for store ${store}:`, err);
       }
+      if (key !== undefined) return resolve(null);
+      if (store === 'parts') return resolve(window.DEFAULT_PARTS || []);
+      return resolve([]);
+    };
+
+    if (!window.db) {
+      window.openDB().then(db => {
+        const tx = db.transaction(store, 'readonly');
+        const req = key !== undefined ? tx.objectStore(store).get(key) : tx.objectStore(store).getAll();
+        req.onsuccess = () => {
+          if (key === undefined && (!req.result || req.result.length === 0)) {
+            handleFallback();
+          } else if (key !== undefined && !req.result) {
+            handleFallback();
+          } else {
+            resolve(req.result);
+          }
+        };
+        req.onerror = () => handleFallback();
+      }).catch(() => handleFallback());
+      return;
+    }
+
+    try {
       const tx = window.db.transaction(store, 'readonly');
       const req = key !== undefined ? tx.objectStore(store).get(key) : tx.objectStore(store).getAll();
-      req.onsuccess = () => res(req.result);
-      req.onerror = () => rej(req.error);
-    });
-  }
+      req.onsuccess = () => {
+        if (key === undefined && (!req.result || req.result.length === 0)) {
+          handleFallback();
+        } else if (key !== undefined && !req.result) {
+          handleFallback();
+        } else {
+          resolve(req.result);
+        }
+      };
+      req.onerror = () => handleFallback();
+    } catch (e) {
+      handleFallback();
+    }
+  });
 };
 
 window.triggerSyncBroadcast = function(store) {
@@ -215,6 +229,23 @@ window.dbPut = function(store, value) {
     });
   }
 
+  // Backup to localStorage fallback asynchronously to never block the main thread
+  setTimeout(async () => {
+    try {
+      if (window.db) {
+        const tx = window.db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).getAll();
+        req.onsuccess = () => {
+          if (req.result && req.result.length > 0) {
+            localStorage.setItem('printex_fallback_' + store, JSON.stringify(req.result));
+          }
+        };
+      }
+    } catch (e) {
+      console.warn(`[dbPut Fallback Update] Failed to update localStorage fallback for ${store}:`, e);
+    }
+  }, 100);
+
   return new Promise((res, rej) => {
     if (!window.db) return res(store === 'settings' ? value.key : value.id);
     const tx = window.db.transaction(store, 'readwrite');
@@ -239,6 +270,23 @@ window.dbDelete = function(store, key) {
       window.updateSyncStatus('offline');
     });
   }
+
+  // Backup to localStorage fallback asynchronously
+  setTimeout(async () => {
+    try {
+      if (window.db) {
+        const tx = window.db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).getAll();
+        req.onsuccess = () => {
+          if (req.result) {
+            localStorage.setItem('printex_fallback_' + store, JSON.stringify(req.result));
+          }
+        };
+      }
+    } catch (e) {
+      console.warn(`[dbDelete Fallback Update] Failed to update localStorage fallback for ${store}:`, e);
+    }
+  }, 100);
 
   return new Promise((res, rej) => {
     if (!window.db) return res();
@@ -1207,6 +1255,7 @@ window.updateSidebarUser = function() {
 const pageTitles = {
   dashboard:'Dashboard',
   inventory:'Inventory',
+  services:'Professional Services',
   invoices:'Invoices (Finalized)',
   quotations:'Quotations (Potential)',
   createInvoice:'New Invoice / Quote',
@@ -1221,8 +1270,17 @@ window.showPage = function(id, navEl) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   const pg = document.getElementById('page-'+id);
   if (pg) { pg.classList.add('active'); pg.classList.add('fade-in'); setTimeout(()=>pg.classList.remove('fade-in'),400); }
+  
+  let targetNav = navEl;
+  if (!targetNav) {
+    targetNav = Array.from(document.querySelectorAll('.nav-item')).find(el => {
+      const oc = el.getAttribute('onclick');
+      return oc && oc.includes(`'${id}'`);
+    });
+  }
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  if (navEl) navEl.classList.add('active');
+  if (targetNav) targetNav.classList.add('active');
+  
   document.getElementById('pageTitleBar').textContent = pageTitles[id] || id;
   window.closeSidebar();
   
@@ -1233,6 +1291,7 @@ window.showPage = function(id, navEl) {
   if (id==='analytics' && typeof window.renderAnalytics === 'function') window.renderAnalytics();
   if (id==='createInvoice' && typeof window.initCreateInvoice === 'function') window.initCreateInvoice();
   if (id==='freelance' && typeof window.renderFreelancePage === 'function') window.renderFreelancePage();
+  if (id==='services' && typeof window.renderServicesPage === 'function') window.renderServicesPage();
 };
 
 window.toggleSidebar = function() {

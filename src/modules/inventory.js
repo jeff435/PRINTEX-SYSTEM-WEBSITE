@@ -264,19 +264,22 @@ window.updateBottomNavBadge = function() {
 };
 
 window.renderDashboard = function() {
-  const totalValue = window.parts.reduce((s,p) => s+(p.stock*(p.priceKsh||0)),0);
-  const lowCount = window.parts.filter(p=>p.stock>0&&p.stock<=p.minStock).length;
-  const outCount = window.parts.filter(p=>p.stock===0).length;
+  const physicalParts = window.parts.filter(p => !p.isService);
+  const activeServices = window.parts.filter(p => p.isService);
+  const totalValue = physicalParts.reduce((s,p) => s+(p.stock*(p.priceKsh||0)),0);
+  const lowCount = physicalParts.filter(p=>p.stock>0&&p.stock<=p.minStock).length;
+  const outCount = physicalParts.filter(p=>p.stock===0).length;
   const kpis = [
-    {label:'Total Parts',value:window.parts.length,sub:`${window.parts.filter(p=>p.stock>0).length} in stock`,color:'var(--accent)',icon:'fa-boxes-stacked',kpiColor:'var(--accent)'},
+    {label:'Total Parts',value:physicalParts.length,sub:`${physicalParts.filter(p=>p.stock>0).length} in stock`,color:'var(--accent)',icon:'fa-boxes-stacked',kpiColor:'var(--accent)'},
     {label:'Total Stock Value',value:window.formatPrice(totalValue),sub:'Based on cost prices',color:'var(--gold)',icon:'fa-coins',kpiColor:'var(--gold)'},
     {label:'Low Stock Items',value:lowCount,sub:'Need reorder soon',color:'var(--warn)',icon:'fa-triangle-exclamation',kpiColor:'var(--warn)'},
     {label:'Out of Stock',value:outCount,sub:'Immediate action needed',color:'var(--danger)',icon:'fa-ban',kpiColor:'var(--danger)'},
+    {label:'Active Services',value:activeServices.length,sub:'Industrial & engineering',color:'var(--gold)',icon:'fa-screwdriver-wrench',kpiColor:'var(--gold)',clickable:true}
   ];
   const grid = document.getElementById('kpiGrid');
   if (grid) {
     grid.innerHTML = kpis.map(k=>`
-      <div class="kpi-card" style="--kpi-color:${k.kpiColor}">
+      <div class="kpi-card" style="--kpi-color:${k.kpiColor}; ${k.clickable ? 'cursor:pointer' : ''}" ${k.clickable ? `onclick="window.showPage('services')"` : ''}>
         <div class="kpi-label">${k.label}</div>
         <div class="kpi-value" style="color:${k.color}">${k.value}</div>
         <div class="kpi-sub">${k.sub}</div>
@@ -286,7 +289,7 @@ window.renderDashboard = function() {
 
   const cats = ['A','B','C','D','E','F','G','J','K','L'];
   const catLabels = ['Valves','Bellows','Gears','Cams','Grippers','Heidelberg','Sensors','Motors','Cylinders','Consumables'];
-  const catStock = cats.map(c => window.parts.filter(p=>p.category===c).reduce((s,p)=>s+p.stock,0));
+  const catStock = cats.map(c => physicalParts.filter(p=>p.category===c).reduce((s,p)=>s+p.stock,0));
   const catColors = cats.map(c => window.CAT_COLORS[c]);
 
   const canvas1 = document.getElementById('catChart');
@@ -337,7 +340,7 @@ window.renderDashboard = function() {
 
   const lsl = document.getElementById('lowStockList');
   if (lsl) {
-    const lowParts = window.parts.filter(p=>p.stock<=p.minStock).slice(0,6);
+    const lowParts = physicalParts.filter(p=>p.stock<=p.minStock).slice(0,6);
     lsl.innerHTML = lowParts.length ? lowParts.map(p=>`
       <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
         <img src="${p.image||window.getCatImage(p.category,p.id)}" style="width:32px;height:32px;border-radius:6px;object-fit:cover" onerror="this.src='${window.getCatImage(p.category,p.id)}'"/>

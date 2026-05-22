@@ -36,19 +36,30 @@ window.searchParts = function() {
     const pr = Number(p.priceKsh || p.price_ksh || 0);
     const cat = p.category || 'G';
     const sid = String(p.id);
+    
+    let badgeHtml = '';
+    let stockHtml = '';
+    
+    if (p.isService) {
+      badgeHtml = `<span style="font-size:9px;background:var(--gold-dim, rgba(212,175,55,0.15));color:var(--gold,#d4af37);padding:2px 4px;border-radius:4px;margin-right:6px;font-weight:700">SERVICE</span>`;
+      stockHtml = `<span style="color:var(--gold,#d4af37)">✓ Service available</span>`;
+    } else {
+      stockHtml = `<span style="${p.stock===0?'color:var(--danger)':p.stock<=5?'color:var(--warn)':'color:var(--success)'}">
+        ${p.stock===0?'Out of stock':`${p.stock} in stock`}
+      </span>`;
+    }
+    
     return `
     <div class="autocomplete-item" onclick="addLineItem('${sid}')" title="Click to add to invoice">
       <img src="${p.image || window.getCatImage(cat, p.id)}" class="autocomplete-thumb"
            onerror="this.src='${window.getCatImage(cat, p.id)}'"/>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:12px;color:var(--text)">${window.esc(pn)}</div>
+        <div style="font-weight:600;font-size:12px;color:var(--text);display:flex;align-items:center">${badgeHtml}${window.esc(pn)}</div>
         <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${window.esc(ds.slice(0,55))}</div>
         <div style="font-size:11px;margin-top:2px">
           <span style="color:var(--gold);font-weight:600">${window.formatPrice(pr)}</span>
           &nbsp;·&nbsp;
-          <span style="${p.stock===0?'color:var(--danger)':p.stock<=5?'color:var(--warn)':'color:var(--success)'}">
-            ${p.stock===0?'Out of stock':`${p.stock} in stock`}
-          </span>
+          ${stockHtml}
         </div>
       </div>
     </div>`;
@@ -72,7 +83,7 @@ window.addLineItem = function(partId) {
   const ds = String(part.desc || part.description || '');
   const pr = Number(part.priceKsh || part.price_ksh || 0);
 
-  if (part.stock === 0) {
+  if (!part.isService && part.stock === 0) {
     if (!confirm(`⚠️ "${pn}" is OUT OF STOCK.\nAdd it to the invoice anyway (quotation only)?`)) return;
   }
 
@@ -81,7 +92,8 @@ window.addLineItem = function(partId) {
     partNum: pn,
     desc: ds,
     qty: 1,
-    price: pr
+    price: pr,
+    isService: part.isService || false
   });
   
   const autocomplete = document.getElementById('partAutocomplete');
@@ -104,10 +116,13 @@ window.renderLineItems = function() {
 
   tbody.innerHTML = window.lineItems.map((item, idx) => {
     const total = item.qty * item.price;
+    const badgeHtml = item.isService 
+      ? `<span class="badge" style="font-size:9px;background:var(--gold-dim, rgba(212,175,55,0.15));color:var(--gold,#d4af37);padding:2px 4px;border-radius:4px;margin-right:6px;font-weight:700;display:inline-block;vertical-align:middle">SERVICE</span>`
+      : '';
     return `
       <tr>
         <td>
-          <div style="font-weight:600;color:var(--text);font-size:13px">${window.esc(item.partNum)}</div>
+          <div style="font-weight:600;color:var(--text);font-size:13px;display:flex;align-items:center">${badgeHtml}${window.esc(item.partNum)}</div>
           <div style="font-size:11px;color:var(--muted)">${window.esc(item.desc)}</div>
         </td>
         <td>
@@ -189,6 +204,7 @@ window.saveInvoice = async function(type = 'invoice') {
   
   if (type === 'invoice') {
     for (const item of window.lineItems) {
+      if (item.isService) continue; // Skip stock validation for services
       const part = window.parts.find(p => String(p.id) === String(item.partId));
       if (part && part.stock < item.qty) {
         return window.showToast(`Not enough stock for ${item.partNum}!`, 'error');
@@ -198,9 +214,10 @@ window.saveInvoice = async function(type = 'invoice') {
 
   const tots = window.calcTotals();
   const invRecord = {
-    id: Date.now(),
+    id: String(Date.now()),
     type: type, // 'invoice' or 'quotation'
     invoiceNumber: document.getElementById('invNum').value,
+    timestamp: Date.now(),
     date: document.getElementById('invDate').value,
     customer: customer,
     notes: document.getElementById('invNotes').value,
@@ -216,23 +233,13 @@ window.saveInvoice = async function(type = 'invoice') {
   };
 
   if (type === 'invoice') {
-    const user = window.fAuth ? window.fAuth.currentUser : null;
     for (const item of window.lineItems) {
+      if (item.isService) continue; // Skip stock deduction for services
       const part = window.parts.find(p => String(p.id) === String(item.partId));
       if (part) {
         part.stock = Math.max(0, part.stock - item.qty);
-        if (user && window.fDb) {
-          try {
-            const partDocRef = window.fDb.collection(`users/${user.uid}/parts`).doc(String(part.id));
-            await partDocRef.update({ stock: firebase.firestore.FieldValue.increment(-item.qty) });
-            await window.dbPutNoSync('parts', part);
-          } catch (fsErr) {
-            console.warn("[Save Invoice] Firestore stock increment failed, falling back to local/sync database:", fsErr);
-            await window.dbPut('parts', part);
-          }
-        } else {
-          await window.dbPut('parts', part);
-        }
+        // Instant non-blocking local-first write!
+        await window.dbPut('parts', part);
       }
     }
   }
@@ -240,7 +247,7 @@ window.saveInvoice = async function(type = 'invoice') {
   window.invoices.push(invRecord);
   await window.dbPut('invoices', invRecord);
 
-  // Push to public_deliveries for Rider tracking
+  // Push to public_deliveries for Rider tracking asynchronously
   if (type === 'invoice' && window.fDb) {
     try {
       window.fDb.collection('public_deliveries').doc(String(invRecord.id)).set({
@@ -262,6 +269,9 @@ window.saveInvoice = async function(type = 'invoice') {
   window.renderInvoiceList();
   window.renderQuotationList();
   if (typeof window.renderAnalytics === 'function') window.renderAnalytics();
+  if (typeof window.renderInventory === 'function') window.renderInventory();
+  if (typeof window.renderDashboard === 'function') window.renderDashboard();
+  
   window.showToast(`${type === 'invoice' ? 'Invoice' : 'Quotation'} saved: ${invRecord.invoiceNumber}`, 'success');
   window.initCreateInvoice();
   
@@ -288,23 +298,13 @@ window.undoLastInvoice = async function() {
 
   try {
     let restoredCount = 0;
-    const user = window.fAuth ? window.fAuth.currentUser : null;
     for (const item of last.items) {
+      if (item.isService) continue; // Skip restock for services
       const part = window.parts.find(p => String(p.id) === String(item.partId));
       if (part) {
         part.stock = part.stock + item.qty;
-        if (user && window.fDb) {
-          try {
-            const partDocRef = window.fDb.collection(`users/${user.uid}/parts`).doc(String(part.id));
-            await partDocRef.update({ stock: firebase.firestore.FieldValue.increment(item.qty) });
-            await window.dbPutNoSync('parts', part);
-          } catch (fsErr) {
-            console.warn("[Undo Invoice] Firestore stock increment failed, falling back to local/sync database:", fsErr);
-            await window.dbPut('parts', part);
-          }
-        } else {
-          await window.dbPut('parts', part);
-        }
+        // Instant non-blocking local-first write!
+        await window.dbPut('parts', part);
         restoredCount++;
       }
     }
@@ -318,10 +318,13 @@ window.undoLastInvoice = async function() {
     if (memIdx >= 0) window.invoices.splice(memIdx, 1);
 
     await window.logActivity(`Invoice undone: ${last.invoiceNumber} — ${restoredCount} part(s) restocked`, 'delete');
-    window.renderInventory();
+    
+    if (typeof window.renderInventory === 'function') window.renderInventory();
     window.renderInvoiceList();
     window.renderQuotationList();
     if (typeof window.renderAnalytics === 'function') window.renderAnalytics();
+    if (typeof window.renderDashboard === 'function') window.renderDashboard();
+    
     window.showToast(`✓ Invoice ${last.invoiceNumber} undone — stock restored for ${restoredCount} part(s)`, 'success');
   } catch(e) {
     console.error('Undo error:', e);
