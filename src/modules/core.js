@@ -399,7 +399,12 @@ window.initializeFirestoreListeners = async function(userId) {
     if (firestoreData.length === 0 && window.db) {
       let localData = [];
       try {
-        localData = await window.dbGet(store) || [];
+        await new Promise((resolve) => {
+          const tx = window.db.transaction(store, 'readonly');
+          const req = tx.objectStore(store).getAll();
+          req.onsuccess = () => { localData = req.result || []; resolve(); };
+          req.onerror = () => resolve();
+        });
       } catch(e) {}
 
       if (localData.length > 0) {
@@ -449,13 +454,47 @@ window.initializeFirestoreListeners = async function(userId) {
         return;
       }
       
-      // Clear IndexedDB store
-      try {
-        const tx = window.db.transaction(store, 'readwrite');
-        tx.objectStore(store).clear();
-      } catch(e) {}
+      // Clear IndexedDB store (except parts, which must always have at least default parts)
+      if (store !== 'parts') {
+        try {
+          const tx = window.db.transaction(store, 'readwrite');
+          tx.objectStore(store).clear();
+        } catch(e) {}
+      } else {
+        // For parts, if Firestore is empty, we should ensure we have at least the default parts!
+        try {
+          let localPartsCount = 0;
+          await new Promise((resolve) => {
+            const tx = window.db.transaction('parts', 'readonly');
+            const req = tx.objectStore('parts').count();
+            req.onsuccess = () => { localPartsCount = req.result; resolve(); };
+            req.onerror = () => resolve();
+          });
+          if (localPartsCount < 400 && typeof window.seedDefaultParts === 'function') {
+            console.log('[updateAndRender] Parts count too low and cloud empty. Reseeding...');
+            await window.seedDefaultParts();
+          }
+        } catch(e) {}
+      }
 
-      if (store === 'parts') { window.parts = []; if (typeof window.renderInventory === 'function') window.renderInventory(); }
+      if (store === 'parts') {
+        // Load parts from IndexedDB rather than setting to empty
+        let localDataParts = [];
+        try {
+          await new Promise((resolve) => {
+            const tx = window.db.transaction('parts', 'readonly');
+            const req = tx.objectStore('parts').getAll();
+            req.onsuccess = () => { localDataParts = req.result || []; resolve(); };
+            req.onerror = () => resolve();
+          });
+        } catch(e) {}
+        if (localDataParts.length >= 400) {
+          window.parts = localDataParts;
+        } else {
+          window.parts = window.DEFAULT_PARTS || [];
+        }
+        if (typeof window.renderInventory === 'function') window.renderInventory();
+      }
       else if (store === 'invoices') { window.invoices = []; if (typeof window.renderInvoiceList === 'function') window.renderInvoiceList(); }
       else if (store === 'activity') { window.activityLog = []; }
       else if (store === 'settings') { window.settings = {}; }
