@@ -220,14 +220,17 @@ window.saveInvoice = async function(type = 'invoice') {
     for (const item of window.lineItems) {
       const part = window.parts.find(p => String(p.id) === String(item.partId));
       if (part) {
+        part.stock = Math.max(0, part.stock - item.qty);
         if (user && window.fDb) {
-          const partDocRef = window.fDb.collection(`users/${user.uid}/parts`).doc(String(part.id));
-          await partDocRef.update({ stock: firebase.firestore.FieldValue.increment(-item.qty) });
-          // Update local state and IndexedDB immediately for instant offline-first experience
-          part.stock = Math.max(0, part.stock - item.qty);
-          await window.dbPutNoSync('parts', part);
+          try {
+            const partDocRef = window.fDb.collection(`users/${user.uid}/parts`).doc(String(part.id));
+            await partDocRef.update({ stock: firebase.firestore.FieldValue.increment(-item.qty) });
+            await window.dbPutNoSync('parts', part);
+          } catch (fsErr) {
+            console.warn("[Save Invoice] Firestore stock increment failed, falling back to local/sync database:", fsErr);
+            await window.dbPut('parts', part);
+          }
         } else {
-          part.stock = Math.max(0, part.stock - item.qty);
           await window.dbPut('parts', part);
         }
       }
@@ -263,9 +266,9 @@ window.saveInvoice = async function(type = 'invoice') {
   window.initCreateInvoice();
   
   if (type === 'quotation') {
-    window.showPage('quotations', document.querySelectorAll('.nav-item')[4]);
+    window.showPage('quotations', document.querySelectorAll('.nav-item')[3]);
   } else {
-    window.showPage('invoices', document.querySelectorAll('.nav-item')[3]);
+    window.showPage('invoices', document.querySelectorAll('.nav-item')[2]);
   }
 };
 
@@ -287,14 +290,17 @@ window.undoLastInvoice = async function() {
     for (const item of last.items) {
       const part = window.parts.find(p => String(p.id) === String(item.partId));
       if (part) {
+        part.stock = part.stock + item.qty;
         if (user && window.fDb) {
-          const partDocRef = window.fDb.collection(`users/${user.uid}/parts`).doc(String(part.id));
-          await partDocRef.update({ stock: firebase.firestore.FieldValue.increment(item.qty) });
-          // Update local state and IndexedDB immediately for instant offline-first experience
-          part.stock = part.stock + item.qty;
-          await window.dbPutNoSync('parts', part);
+          try {
+            const partDocRef = window.fDb.collection(`users/${user.uid}/parts`).doc(String(part.id));
+            await partDocRef.update({ stock: firebase.firestore.FieldValue.increment(item.qty) });
+            await window.dbPutNoSync('parts', part);
+          } catch (fsErr) {
+            console.warn("[Undo Invoice] Firestore stock increment failed, falling back to local/sync database:", fsErr);
+            await window.dbPut('parts', part);
+          }
         } else {
-          part.stock = part.stock + item.qty;
           await window.dbPut('parts', part);
         }
         restoredCount++;
