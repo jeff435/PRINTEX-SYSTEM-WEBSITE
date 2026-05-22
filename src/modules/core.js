@@ -191,7 +191,7 @@ window.dbPut = function(store, value) {
     if (!value.key) value.key = String(value.id);
   }
 
-  value._synced = true;
+  value._synced = false;
   value._lastUpdated = Date.now();
 
   const user = window.fAuth ? window.fAuth.currentUser : null;
@@ -201,6 +201,7 @@ window.dbPut = function(store, value) {
     const docRef = window.fDb.collection(`users/${user.uid}/${store}`).doc(docId);
     
     const cleanedValue = Object.assign({}, value);
+    cleanedValue._synced = true; // Synced once written/listened from Firestore
     if (store === 'invoices' && Array.isArray(cleanedValue.items)) {
       cleanedValue.items = JSON.stringify(cleanedValue.items);
     }
@@ -467,36 +468,88 @@ window.initializeFirestoreListeners = async function(userId) {
       return;
     }
 
-    // Merge into local IndexedDB
+    // Merge into local IndexedDB using a smart self-correcting merge engine
     if (window.db && firestoreData.length > 0) {
       try {
-        const tx = window.db.transaction(store, 'readwrite');
-        const os = tx.objectStore(store);
-        os.clear(); // Clear old to ensure deletes propagate
-        for (const item of firestoreData) {
-          os.put(item);
-        }
-      } catch(e) { console.warn('[DB] IndexedDB write error:', e); }
+        // Read current local items from IndexedDB
+        let localData = [];
+        await new Promise((resolve) => {
+          const tx = window.db.transaction(store, 'readonly');
+          const req = tx.objectStore(store).getAll();
+          req.onsuccess = () => { localData = req.result || []; resolve(); };
+          req.onerror = () => resolve();
+        });
+
+        // Await the write transaction to ensure all changes are committed before reading back
+        await new Promise((resolve, reject) => {
+          const tx = window.db.transaction(store, 'readwrite');
+          const os = tx.objectStore(store);
+
+          // Map Firestore data by ID
+          const firestoreMap = new Map();
+          for (const item of firestoreData) {
+            const itemId = store === 'settings' ? String(item.key || item.id) : String(item.id);
+            firestoreMap.set(itemId, item);
+          }
+
+          // 1. Identify which local items to delete or keep
+          for (const localItem of localData) {
+            const localId = store === 'settings' ? String(localItem.key || localItem.id) : String(localItem.id);
+            
+            if (!firestoreMap.has(localId)) {
+              // Item exists locally but is not in Firestore snapshot
+              if (localItem._synced === true) {
+                // It was previously synced, meaning it has been deleted on the server. Remove it locally.
+                os.delete(localId);
+              }
+              // If _synced is false, it's a newly added local item that hasn't synced yet. Keep it!
+            }
+          }
+
+          // 2. Put/update all Firestore items locally and mark them as synced
+          for (const item of firestoreData) {
+            const cleanItem = { ...item, _synced: true };
+            os.put(cleanItem);
+          }
+
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+      } catch(e) { console.warn('[DB] IndexedDB smart merge error:', e); }
     }
 
-    // Re-populate global memory arrays unconditionally (no buggy length checks)
+    // Re-populate global memory arrays from local IndexedDB (merged source-of-truth)
+    let mergedData = firestoreData;
+    if (window.db) {
+      try {
+        await new Promise((resolve) => {
+          const tx = window.db.transaction(store, 'readonly');
+          const req = tx.objectStore(store).getAll();
+          req.onsuccess = () => { mergedData = req.result || []; resolve(); };
+          req.onerror = () => resolve();
+        });
+      } catch (e) {
+        console.warn('[DB] Failed to read merged data from IndexedDB:', e);
+      }
+    }
+
     if (store === 'parts') {
-      window.parts = firestoreData;
+      window.parts = mergedData;
       if (typeof window.renderInventory === 'function') window.renderInventory();
     } else if (store === 'invoices') {
-      window.invoices = firestoreData;
+      window.invoices = mergedData;
       if (typeof window.renderInvoiceList === 'function') window.renderInvoiceList();
     } else if (store === 'activity') {
-      window.activityLog = firestoreData;
+      window.activityLog = mergedData;
     } else if (store === 'settings') {
       window.settings = {};
-      firestoreData.forEach(s => window.settings[s.key] = s.value);
+      mergedData.forEach(s => window.settings[s.key] = s.value);
       if (window.settings.invoiceCounter) {
         window.invoiceCounter = parseInt(window.settings.invoiceCounter) || 1;
       }
       if (typeof window.applySettings === 'function') window.applySettings();
     } else if (store === 'submissions') {
-      window.submissions = firestoreData;
+      window.submissions = mergedData;
       if (typeof window.renderFreelancePage === 'function') window.renderFreelancePage();
     }
 

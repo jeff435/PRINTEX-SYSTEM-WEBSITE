@@ -1624,7 +1624,8 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       if (saved) window.updateAIStatus(true);
       
       if (typeof window.updateBottomNavBadge === 'function') window.updateBottomNavBadge();
-      if (typeof window.runPrintexBulkImport === 'function') window.runPrintexBulkImport();
+      // Manual bulk import is disabled on auto-boot to prevent overwriting of the 436 default parts.
+      // if (typeof window.runPrintexBulkImport === 'function') window.runPrintexBulkImport();
     }).catch(e => {
       console.error('Boot error:', e);
       if (typeof window.checkLogin === 'function') window.checkLogin();
