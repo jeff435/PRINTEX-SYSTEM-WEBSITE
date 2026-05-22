@@ -245,7 +245,7 @@ window.initApp = async function() {
 
   // ── VERSION-BASED FORCE RESET ──
   // When DEFAULT_PARTS count changes (new parts added), force-reseed the database
-  const PARTS_VERSION = 'v3_436parts';
+  const PARTS_VERSION = 'v4_august2025_308parts';
   const currentVersion = localStorage.getItem('printex_parts_version_local');
 
   if (currentVersion !== PARTS_VERSION && typeof window.DEFAULT_PARTS !== 'undefined' && window.dbPut) {
@@ -277,13 +277,14 @@ window.initApp = async function() {
     // Normal load from database
     try {
       const savedParts = await window.dbGet('parts') || [];
-      if (savedParts.length >= 400) {
+      const threshold = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 300;
+      if (savedParts.length >= threshold) {
         window.parts = savedParts;
       } else if (typeof window.DEFAULT_PARTS !== 'undefined' && window.DEFAULT_PARTS.length > 0) {
         // Version key said DB was populated but IndexedDB is empty/incomplete.
         // This happens when the browser wipes IndexedDB (storage pressure, private mode, etc.).
         // Self-heal: reseed now so the user never sees zero parts.
-        console.log('[InitApp] Version key present but parts count < 400 (' + savedParts.length + '). Self-healing reseed...');
+        console.log('[InitApp] Version key present but parts count < ' + threshold + ' (' + savedParts.length + '). Self-healing reseed...');
         try {
           window.parts = [];
           for (const dp of window.DEFAULT_PARTS) {

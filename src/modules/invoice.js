@@ -189,7 +189,7 @@ window.saveInvoice = async function(type = 'invoice') {
   
   if (type === 'invoice') {
     for (const item of window.lineItems) {
-      const part = window.parts.find(p => p.id === item.partId);
+      const part = window.parts.find(p => String(p.id) === String(item.partId));
       if (part && part.stock < item.qty) {
         return window.showToast(`Not enough stock for ${item.partNum}!`, 'error');
       }
@@ -218,7 +218,7 @@ window.saveInvoice = async function(type = 'invoice') {
   if (type === 'invoice') {
     const user = window.fAuth ? window.fAuth.currentUser : null;
     for (const item of window.lineItems) {
-      const part = window.parts.find(p => p.id === item.partId);
+      const part = window.parts.find(p => String(p.id) === String(item.partId));
       if (part) {
         if (user && window.fDb) {
           const partDocRef = window.fDb.collection(`users/${user.uid}/parts`).doc(String(part.id));
@@ -285,7 +285,7 @@ window.undoLastInvoice = async function() {
     let restoredCount = 0;
     const user = window.fAuth ? window.fAuth.currentUser : null;
     for (const item of last.items) {
-      const part = window.parts.find(p => p.id === item.partId);
+      const part = window.parts.find(p => String(p.id) === String(item.partId));
       if (part) {
         if (user && window.fDb) {
           const partDocRef = window.fDb.collection(`users/${user.uid}/parts`).doc(String(part.id));

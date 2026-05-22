@@ -355,7 +355,7 @@ window.initializeFirestoreListeners = async function(userId) {
   window.updateSyncStatus('syncing');
 
   // ── VERSION-BASED FIRESTORE RESET FOR THIS USER ──
-  const PARTS_VERSION = 'v3_436parts';
+  const PARTS_VERSION = 'v4_august2025_308parts';
   const userVersionKey = 'printex_parts_version_' + userId;
   const currentVersion = localStorage.getItem(userVersionKey);
 
@@ -363,24 +363,44 @@ window.initializeFirestoreListeners = async function(userId) {
   if (!needsReseed) {
     try {
       const partsSnap = await window.fDb.collection(`users/${userId}/parts`).get();
-      if (partsSnap.size < 400) { // The default parts has 436 parts, so less than 400 means incomplete or old seed
-        console.log(`[Firestore Sync] User has only ${partsSnap.size} parts in Firestore. Forcing reseed to 436 parts.`);
+      const expectedPartsCount = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 308;
+      if (partsSnap.size < expectedPartsCount) { // Less than expected parts count means incomplete or old seed
+        console.log(`[Firestore Sync] User has only ${partsSnap.size} parts in Firestore. Forcing reseed to ${expectedPartsCount} parts.`);
         needsReseed = true;
       }
     } catch (e) {
       console.warn("Could not check Firestore parts size:", e);
+      // Fallback self-repair check: if local IndexedDB is empty/incomplete, we must force a reseed!
+      try {
+        if (!window.db) await window.openDB();
+        let localPartsCount = 0;
+        await new Promise((resolve) => {
+          const tx = window.db.transaction('parts', 'readonly');
+          const req = tx.objectStore('parts').count();
+          req.onsuccess = () => { localPartsCount = req.result; resolve(); };
+          req.onerror = () => resolve();
+        });
+        const expectedPartsCount = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 308;
+        if (localPartsCount < expectedPartsCount) {
+          console.log(`[Firestore Sync] Both Firestore check failed and local IndexedDB is incomplete (<${expectedPartsCount}). Forcing reseed.`);
+          needsReseed = true;
+        }
+      } catch (localErr) {
+        console.warn("Could not check local IndexedDB size:", localErr);
+      }
     }
   }
 
   if (needsReseed && typeof window.DEFAULT_PARTS !== 'undefined') {
+    const expectedPartsCount = window.DEFAULT_PARTS.length;
     console.log('[Firestore Sync] Version mismatch/missing or incomplete database for user ' + userId + '. Force-reseeding Firestore and IndexedDB...');
     if (typeof window.showToast === 'function') {
-      window.showToast('🔄 Seeding cloud database with all 436 parts...', 'info');
+      window.showToast(`🔄 Seeding cloud database with all ${expectedPartsCount} parts...`, 'info');
     }
     try {
       await window.seedDefaultParts();
       if (typeof window.showToast === 'function') {
-        window.showToast('✅ Database successfully updated with all 436 parts!', 'success');
+        window.showToast(`✅ Database successfully updated with all ${expectedPartsCount} parts!`, 'success');
       }
     } catch(err) {
       console.error('[Firestore Sync] Force-reseed failed:', err);
@@ -1280,13 +1300,14 @@ window.toggleTheme = function() {
 };
 
 window.resetToDefault = async function() {
-  if (!confirm('Reset all inventory to default 436 parts? Your custom parts will be lost.')) return;
+  const expectedPartsCount = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 308;
+  if (!confirm(`Reset all inventory to default ${expectedPartsCount} parts? Your custom parts will be lost.`)) return;
   window.showSpinner();
   try {
     await window.seedDefaultParts();
     if (typeof window.renderInventory === 'function') window.renderInventory();
     if (typeof window.renderDashboard === 'function') window.renderDashboard();
-    window.showToast('Inventory reset to default 436 parts', 'success');
+    window.showToast(`Inventory reset to default ${expectedPartsCount} parts`, 'success');
   } catch (e) {
     console.error('Reset to default failed:', e);
     window.showToast('Reset failed: ' + e.message, 'error');
@@ -1340,7 +1361,7 @@ window.seedDefaultParts = async function() {
   //    CRITICAL FIX: We skip clearing the Firestore collection first to eliminate
   //    the race condition where batch deletes and batch writes overlap while
   //    snapshot listeners are active, causing the UI to see an intermediate
-  //    incomplete collection (e.g. 282 instead of 436 parts).
+  //    incomplete collection (e.g. 282 instead of expected parts).
   //    Since every default part has a fixed, unique ID, set() will create or
   //    fully overwrite each document without needing to delete first.
   if (userId && window.fDb) {
@@ -1401,7 +1422,7 @@ window.seedDefaultParts = async function() {
   });
   
   // 5. Update local storage version keys
-  const PARTS_VERSION = 'v3_436parts';
+  const PARTS_VERSION = 'v4_august2025_308parts';
   localStorage.setItem('printex_parts_version_local', PARTS_VERSION);
   if (userId) {
     localStorage.setItem('printex_parts_version_' + userId, PARTS_VERSION);
