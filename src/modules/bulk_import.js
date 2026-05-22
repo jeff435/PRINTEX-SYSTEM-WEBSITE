@@ -56,3 +56,9 @@ window.runPrintexBulkImport = async function() {
   
   window._printexImportRunning = false;
 };
+
+// ── CRITICAL: Expose the parts list as window.DEFAULT_PARTS ──────────────────
+// All seeding logic in core.js and sync.js checks window.DEFAULT_PARTS.
+// Without this line, seedDefaultParts() silently returns immediately because
+// typeof window.DEFAULT_PARTS === 'undefined', and the database never gets seeded.
+window.DEFAULT_PARTS = window.printexBulkImportData;

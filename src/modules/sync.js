@@ -277,7 +277,33 @@ window.initApp = async function() {
     // Normal load from database
     try {
       const savedParts = await window.dbGet('parts') || [];
-      if (savedParts.length > 0) window.parts = savedParts;
+      if (savedParts.length >= 400) {
+        window.parts = savedParts;
+      } else if (typeof window.DEFAULT_PARTS !== 'undefined' && window.DEFAULT_PARTS.length > 0) {
+        // Version key said DB was populated but IndexedDB is empty/incomplete.
+        // This happens when the browser wipes IndexedDB (storage pressure, private mode, etc.).
+        // Self-heal: reseed now so the user never sees zero parts.
+        console.log('[InitApp] Version key present but parts count < 400 (' + savedParts.length + '). Self-healing reseed...');
+        try {
+          window.parts = [];
+          for (const dp of window.DEFAULT_PARTS) {
+            const part = { ...dp, image: null };
+            await window.dbPut('parts', part);
+            window.parts.push(part);
+          }
+          localStorage.setItem('printex_parts_version_local', PARTS_VERSION);
+          console.log('[InitApp] Self-heal complete: ' + window.parts.length + ' parts loaded.');
+          if (typeof window.showToast === 'function') {
+            window.showToast('✅ Inventory restored: ' + window.parts.length + ' parts loaded!', 'success');
+          }
+        } catch(reseedErr) {
+          console.error('[InitApp] Self-heal reseed failed:', reseedErr);
+          // Fallback: at least show parts from memory even if IDB write failed
+          window.parts = window.DEFAULT_PARTS.map(dp => ({ ...dp, image: null }));
+        }
+      } else if (savedParts.length > 0) {
+        window.parts = savedParts;
+      }
     } catch(e) {
       console.warn('[InitApp] Could not load parts:', e);
     }
