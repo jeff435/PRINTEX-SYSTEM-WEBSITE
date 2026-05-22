@@ -490,7 +490,8 @@ window.initializeFirestoreListeners = async function(userId) {
             req.onsuccess = () => { localPartsCount = req.result; resolve(); };
             req.onerror = () => resolve();
           });
-          if (localPartsCount < 400 && typeof window.seedDefaultParts === 'function') {
+          const expectedPartsCount = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 308;
+          if (localPartsCount < expectedPartsCount && typeof window.seedDefaultParts === 'function') {
             console.log('[updateAndRender] Parts count too low and cloud empty. Reseeding...');
             await window.seedDefaultParts();
           }
@@ -508,7 +509,8 @@ window.initializeFirestoreListeners = async function(userId) {
             req.onerror = () => resolve();
           });
         } catch(e) {}
-        if (localDataParts.length >= 400) {
+        const expectedPartsCount = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 308;
+        if (localDataParts.length >= expectedPartsCount) {
           window.parts = localDataParts;
         } else {
           window.parts = window.DEFAULT_PARTS || [];

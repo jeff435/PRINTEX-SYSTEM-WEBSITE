@@ -266,9 +266,11 @@ window.saveInvoice = async function(type = 'invoice') {
   window.initCreateInvoice();
   
   if (type === 'quotation') {
-    window.showPage('quotations', document.querySelectorAll('.nav-item')[3]);
+    const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'quotations'"));
+    window.showPage('quotations', navEl);
   } else {
-    window.showPage('invoices', document.querySelectorAll('.nav-item')[2]);
+    const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'invoices'"));
+    window.showPage('invoices', navEl);
   }
 };
 
@@ -1069,7 +1071,8 @@ window.promptMpesaQuick = function() {
   if (unpaid.length) window.openMpesaModal(unpaid[unpaid.length-1].id);
   else { 
     window.showToast('No unpaid invoices. Create one first.', 'warn'); 
-    window.showPage('createInvoice', document.querySelectorAll('.nav-item')[4]); 
+    const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'createInvoice'"));
+    window.showPage('createInvoice', navEl); 
   }
 };
 
