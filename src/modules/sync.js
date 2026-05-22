@@ -250,7 +250,6 @@ window.initApp = async function() {
   } catch(e) {
     console.warn('[InitApp] Could not load parts:', e);
   }
-  }
 
   // Load other data normally
   try {
