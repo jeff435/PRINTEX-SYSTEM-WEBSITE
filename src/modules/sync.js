@@ -243,71 +243,13 @@ window.initApp = async function() {
     console.error('[InitApp] IndexedDB failed to open:', e);
   }
 
-  // ── VERSION-BASED FORCE RESET ──
-  // When DEFAULT_PARTS count changes (new parts added), force-reseed the database
-  const PARTS_VERSION = 'v4_august2025_308parts';
-  const currentVersion = localStorage.getItem('printex_parts_version_local');
-
-  if (currentVersion !== PARTS_VERSION && typeof window.DEFAULT_PARTS !== 'undefined' && window.dbPut) {
-    console.log('[InitApp] Local parts version changed! Force-reseeding IndexedDB with', window.DEFAULT_PARTS.length, 'parts...');
-    try {
-      // Clear old parts from IndexedDB
-      if (typeof window.dbClear === 'function') {
-        await window.dbClear('parts');
-      }
-
-      // Seed ALL default parts into the database
-      window.parts = [];
-      for (const dp of window.DEFAULT_PARTS) {
-        const part = { ...dp, image: null };
-        await window.dbPut('parts', part);
-        window.parts.push(part);
-      }
-
-      localStorage.setItem('printex_parts_version_local', PARTS_VERSION);
-      console.log('[InitApp] Successfully seeded IndexedDB with', window.parts.length, 'parts!');
-
-      if (typeof window.showToast === 'function') {
-        window.showToast('✅ Inventory updated: ' + window.parts.length + ' spare parts loaded!', 'success');
-      }
-    } catch(e) {
-      console.error('[InitApp] Force-reseed failed:', e);
-    }
-  } else {
-    // Normal load from database
-    try {
-      const savedParts = await window.dbGet('parts') || [];
-      const threshold = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 300;
-      if (savedParts.length >= threshold) {
-        window.parts = savedParts;
-      } else if (typeof window.DEFAULT_PARTS !== 'undefined' && window.DEFAULT_PARTS.length > 0) {
-        // Version key said DB was populated but IndexedDB is empty/incomplete.
-        // This happens when the browser wipes IndexedDB (storage pressure, private mode, etc.).
-        // Self-heal: reseed now so the user never sees zero parts.
-        console.log('[InitApp] Version key present but parts count < ' + threshold + ' (' + savedParts.length + '). Self-healing reseed...');
-        try {
-          window.parts = [];
-          for (const dp of window.DEFAULT_PARTS) {
-            const part = { ...dp, image: null };
-            await window.dbPut('parts', part);
-            window.parts.push(part);
-          }
-          localStorage.setItem('printex_parts_version_local', PARTS_VERSION);
-          console.log('[InitApp] Self-heal complete: ' + window.parts.length + ' parts loaded.');
-          if (typeof window.showToast === 'function') {
-            window.showToast('✅ Inventory restored: ' + window.parts.length + ' parts loaded!', 'success');
-          }
-        } catch(reseedErr) {
-          console.error('[InitApp] Self-heal reseed failed:', reseedErr);
-          // Fallback: at least show parts from memory even if IDB write failed
-          window.parts = window.DEFAULT_PARTS.map(dp => ({ ...dp, image: null }));
-        }
-      } else if (savedParts.length > 0) {
-        window.parts = savedParts;
-      }
-    } catch(e) {
-      console.warn('[InitApp] Could not load parts:', e);
-    }
+  // Load parts from local database cache (Firestore listeners in core.js handle all seeding decisions)
+  try {
+    const savedParts = await window.dbGet('parts') || [];
+    if (savedParts.length > 0) window.parts = savedParts;
+  } catch(e) {
+    console.warn('[InitApp] Could not load parts:', e);
+  }
   }
 
   // Load other data normally

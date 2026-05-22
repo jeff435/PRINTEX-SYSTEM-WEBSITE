@@ -111,6 +111,7 @@ async function startServer() {
         payment_status TEXT,
         payment_ref TEXT,
         paid_at TEXT,
+        delivery_status TEXT DEFAULT 'pending',
         created_at TEXT,
         updated_at INTEGER DEFAULT 0
       );
@@ -171,6 +172,17 @@ async function startServer() {
         await pool.query("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at INTEGER DEFAULT 0;");
       } else {
         sqlite.prepare("ALTER TABLE inventory ADD COLUMN updated_at INTEGER DEFAULT 0").run();
+      }
+    } catch (e) {
+      // Column might exist, ignore
+    }
+
+    // Migration: Add delivery_status column to invoices if it doesn't exist
+    try {
+      if (pool) {
+        await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS delivery_status TEXT DEFAULT 'pending';");
+      } else {
+        sqlite.prepare("ALTER TABLE invoices ADD COLUMN delivery_status TEXT DEFAULT 'pending'").run();
       }
     } catch (e) {
       // Column might exist, ignore
@@ -551,6 +563,52 @@ async function startServer() {
   });
 
   // --- Delivery API ---
+  app.get("/api/delivery/:deliveryId", async (req, res) => {
+    const { deliveryId } = req.params;
+    try {
+      let deliveryData: any = null;
+      
+      // 1. Try fetching from Firestore first
+      try {
+        const doc = await db().collection("public_deliveries").doc(String(deliveryId)).get();
+        if (doc.exists) {
+          deliveryData = doc.data();
+        }
+      } catch (e) {
+        console.warn("Firestore not available or error fetching delivery, falling back to local DB:", e);
+      }
+      
+      // 2. If not found or Firestore offline, try local database fallback
+      if (!deliveryData) {
+        const invCheck = await query(
+          "SELECT id, invoice_number, customer, grand, payment_status, payment_ref, delivery_status FROM invoices WHERE id = $1 OR invoice_number = $1",
+          [deliveryId]
+        );
+        if (invCheck.rows.length > 0) {
+          const row = invCheck.rows[0];
+          deliveryData = {
+            deliveryId: row.id,
+            invoiceNumber: row.invoice_number,
+            customer: row.customer,
+            grand: row.grand,
+            paymentStatus: row.payment_status || 'pending',
+            paymentRef: row.payment_ref || '',
+            deliveryStatus: row.delivery_status || 'pending'
+          };
+        }
+      }
+
+      if (!deliveryData) {
+        return res.status(404).json({ error: "Delivery not found" });
+      }
+
+      res.json({ success: true, data: deliveryData });
+    } catch (e: any) {
+      console.error("Delivery fetch error:", e);
+      res.status(500).json({ error: "Failed to fetch delivery data" });
+    }
+  });
+
   app.post("/api/delivery/update", async (req, res) => {
     const { deliveryId, status, token } = req.body;
     if (!deliveryId || !status || !token) return res.status(400).json({ error: "Missing required fields" });
@@ -561,11 +619,19 @@ async function startServer() {
     }
 
     try {
+      // 1. Update Firebase public_deliveries
       await db().collection('public_deliveries').doc(String(deliveryId)).set({
         deliveryStatus: status,
         updatedAt: Date.now()
       }, { merge: true });
 
+      // 2. Update local database invoice delivery status
+      await query(
+        "UPDATE invoices SET delivery_status = $1, updated_at = $2 WHERE id = $3",
+        [status, Date.now(), String(deliveryId)]
+      );
+
+      // 3. Update Firestore user-specific invoice and activity if invoice exists
       const invCheck = await query("SELECT user_id, invoice_number FROM invoices WHERE id = $1", [deliveryId]);
       if (invCheck.rows.length > 0) {
         const userId = invCheck.rows[0].user_id;
@@ -649,10 +715,10 @@ async function startServer() {
         for (const inv of invoices) {
           const itemsStr = typeof inv.items === 'string' ? inv.items : JSON.stringify(inv.items);
           await query(
-            `INSERT INTO invoices (id, user_id, invoice_number, date, customer, notes, type, items, subtotal, discount_pct, discount_amt, vat, vat_rate, grand, payment_status, payment_ref, paid_at, created_at, updated_at) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-             ON CONFLICT(id) DO UPDATE SET invoice_number=$3, date=$4, customer=$5, notes=$6, type=$7, items=$8, subtotal=$9, discount_pct=$10, discount_amt=$11, vat=$12, vat_rate=$13, grand=$14, payment_status=$15, payment_ref=$16, paid_at=$17, created_at=$18, updated_at=$19`,
-            [String(inv.id), userId, inv.invoiceNumber, inv.date, inv.customer, inv.notes || '', inv.type, itemsStr, inv.subtotal, inv.discountPct, inv.discountAmt, inv.vat, inv.vatRate, inv.grand, inv.paymentStatus || '', inv.paymentRef || '', inv.paidAt || '', inv.createdAt, now]
+            `INSERT INTO invoices (id, user_id, invoice_number, date, customer, notes, type, items, subtotal, discount_pct, discount_amt, vat, vat_rate, grand, payment_status, payment_ref, paid_at, delivery_status, created_at, updated_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+             ON CONFLICT(id) DO UPDATE SET invoice_number=$3, date=$4, customer=$5, notes=$6, type=$7, items=$8, subtotal=$9, discount_pct=$10, discount_amt=$11, vat=$12, vat_rate=$13, grand=$14, payment_status=$15, payment_ref=$16, paid_at=$17, delivery_status=$18, created_at=$19, updated_at=$20`,
+            [String(inv.id), userId, inv.invoiceNumber, inv.date, inv.customer, inv.notes || '', inv.type, itemsStr, inv.subtotal, inv.discountPct, inv.discountAmt, inv.vat, inv.vatRate, inv.grand, inv.paymentStatus || '', inv.paymentRef || '', inv.paidAt || '', inv.deliveryStatus || 'pending', inv.createdAt, now]
           );
         }
       }

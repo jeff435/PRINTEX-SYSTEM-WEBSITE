@@ -206,8 +206,12 @@ window.dbPut = function(store, value) {
       cleanedValue.items = JSON.stringify(cleanedValue.items);
     }
     
-    docRef.set(cleanedValue, { merge: true }).catch(err => {
+    window.updateSyncStatus('syncing');
+    docRef.set(cleanedValue, { merge: true }).then(() => {
+      window.updateSyncStatus('synced');
+    }).catch(err => {
       console.warn("[Firestore] Offline save queued:", err);
+      window.updateSyncStatus('offline');
     });
   }
 
@@ -227,8 +231,12 @@ window.dbDelete = function(store, key) {
   const user = window.fAuth ? window.fAuth.currentUser : null;
   if (user && window.fDb) {
     const docRef = window.fDb.collection(`users/${user.uid}/${store}`).doc(String(key));
-    docRef.delete().catch(err => {
+    window.updateSyncStatus('syncing');
+    docRef.delete().then(() => {
+      window.updateSyncStatus('synced');
+    }).catch(err => {
       console.warn("[Firestore] Offline delete queued:", err);
+      window.updateSyncStatus('offline');
     });
   }
 
@@ -283,6 +291,17 @@ window.dbClear = function(store) {
   });
 
   return Promise.all([firestorePromise, idbPromise]);
+};
+
+// ── DEBOUNCED DB PUT FOR RAPID WRITES ────────────────────────────
+const _dbPutTimers = {};
+window.debouncedDbPut = function(store, value, delayMs = 300) {
+  const key = store + ':' + (store === 'settings' ? String(value.key) : String(value.id));
+  if (_dbPutTimers[key]) clearTimeout(_dbPutTimers[key]);
+  _dbPutTimers[key] = setTimeout(() => {
+    delete _dbPutTimers[key];
+    window.dbPut(store, value);
+  }, delayMs);
 };
 
 // ── SYNC STATUS DOTS ──────────────────────────────────────────────
@@ -359,35 +378,20 @@ window.initializeFirestoreListeners = async function(userId) {
   const userVersionKey = 'printex_parts_version_' + userId;
   const currentVersion = localStorage.getItem(userVersionKey);
 
-  let needsReseed = currentVersion !== PARTS_VERSION;
-  if (!needsReseed) {
+  let needsReseed = false;
+  if (currentVersion !== PARTS_VERSION) {
     try {
-      const partsSnap = await window.fDb.collection(`users/${userId}/parts`).get();
-      const expectedPartsCount = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 308;
-      if (partsSnap.size < expectedPartsCount) { // Less than expected parts count means incomplete or old seed
-        console.log(`[Firestore Sync] User has only ${partsSnap.size} parts in Firestore. Forcing reseed to ${expectedPartsCount} parts.`);
+      const partsSnap = await window.fDb.collection(`users/${userId}/parts`).limit(1).get();
+      if (partsSnap.empty) {
+        console.log('[Firestore Sync] Firestore parts collection is empty for user ' + userId + '. Will seed default parts.');
         needsReseed = true;
+      } else {
+        // Collection has existing data — do NOT reseed, just update version key
+        console.log('[Firestore Sync] Firestore has existing parts data. Skipping reseed, updating version key.');
+        localStorage.setItem(userVersionKey, PARTS_VERSION);
       }
     } catch (e) {
-      console.warn("Could not check Firestore parts size:", e);
-      // Fallback self-repair check: if local IndexedDB is empty/incomplete, we must force a reseed!
-      try {
-        if (!window.db) await window.openDB();
-        let localPartsCount = 0;
-        await new Promise((resolve) => {
-          const tx = window.db.transaction('parts', 'readonly');
-          const req = tx.objectStore('parts').count();
-          req.onsuccess = () => { localPartsCount = req.result; resolve(); };
-          req.onerror = () => resolve();
-        });
-        const expectedPartsCount = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 308;
-        if (localPartsCount < expectedPartsCount) {
-          console.log(`[Firestore Sync] Both Firestore check failed and local IndexedDB is incomplete (<${expectedPartsCount}). Forcing reseed.`);
-          needsReseed = true;
-        }
-      } catch (localErr) {
-        console.warn("Could not check local IndexedDB size:", localErr);
-      }
+      console.warn("Could not check Firestore parts:", e);
     }
   }
 

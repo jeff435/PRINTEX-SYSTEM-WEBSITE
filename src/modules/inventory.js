@@ -98,9 +98,14 @@ window.adjustStock = async function(id, delta) {
   if (!part) { window.showToast('Part not found', 'error'); return; }
   const newStock = Math.max(0, (part.stock||0) + delta);
   part.stock = newStock;
-  try { await window.dbPut('parts', part); } catch {}
+  // Debounce Firestore write for rapid +/- clicks to prevent concurrent writes
+  if (typeof window.debouncedDbPut === 'function') {
+    window.debouncedDbPut('parts', part, 300);
+  } else {
+    try { await window.dbPut('parts', part); } catch {}
+  }
   const pn = part.partNum || part.part_num || String(id);
-  await window.logActivity(`Stock ${delta>0?'increased':'decreased'} for ${pn} → ${newStock}`, 'stock');
+  window.logActivity(`Stock ${delta>0?'increased':'decreased'} for ${pn} → ${newStock}`, 'stock');
   window.filterInventory();
   window.showToast(`Stock updated: ${pn} → ${newStock}`, 'success');
 };
@@ -182,7 +187,7 @@ window.savePart = async function() {
           const old = window.parts.find(p => String(p.id) === String(editId));
           if (old) payload.image = old.image || null;
         }
-        payload.id = isNaN(editId) ? editId : parseInt(editId);
+        payload.id = String(editId);
         const saved = await window.dbPut('parts', payload);
         payload.id = payload.id || saved;
         const idx = window.parts.findIndex(p => String(p.id) === String(editId));
@@ -232,9 +237,7 @@ window.deletePart = async function(id) {
   const pn = p ? (p.partNum || p.part_num || 'this part') : 'this part';
   if (!confirm(`⚠️ Delete "${pn}"?\n\nThis cannot be undone.`)) return;
   try {
-    try { await window.dbDelete('parts', isNaN(id) ? id : parseInt(id)); } catch {
-      await window.dbDelete('parts', id);
-    }
+    await window.dbDelete('parts', String(id));
     window.parts = window.parts.filter(x => String(x.id) !== String(id));
     await window.logActivity(`Part deleted: ${pn}`, 'delete');
     window.filterInventory();

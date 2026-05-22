@@ -18,6 +18,20 @@ const pool = process.env.DATABASE_URL ? new Pool({
   ssl: { rejectUnauthorized: false }
 }) : null;
 
+// Run startup database migrations in PostgreSQL
+if (pool) {
+  (async () => {
+    try {
+      await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS delivery_status TEXT DEFAULT 'pending';");
+      await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_rate REAL DEFAULT 0;");
+      await pool.query("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at INTEGER DEFAULT 0;");
+      console.log("PostgreSQL migrations run successfully.");
+    } catch (e) {
+      console.error("PostgreSQL startup migration error:", e);
+    }
+  })();
+}
+
 async function query(text: string, params: any[] = []) {
   if (!pool) {
     console.error("No DATABASE_URL set. Returning empty result.");
@@ -355,6 +369,51 @@ app.get("/api/mpesa/status/:checkoutId", async (req, res) => {
 });
 
 // ─── Delivery Update (Public Rider Access via Token) ───────────────
+// ─── Delivery Info (Public Read with local DB fallback) ────────────
+app.get("/api/delivery/:deliveryId", async (req, res) => {
+  const { deliveryId } = req.params;
+  try {
+    let deliveryData: any = null;
+
+    // 1. Try fetching from Firestore first
+    try {
+      const doc = await fDb().collection("public_deliveries").doc(String(deliveryId)).get();
+      if (doc.exists) {
+        deliveryData = doc.data();
+      }
+    } catch (e) {
+      console.warn("Firestore not available or error fetching delivery, falling back to local DB:", e);
+    }
+
+    // 2. If not found or Firestore offline, try local database fallback
+    if (!deliveryData) {
+      const invCheck = await query(
+        "SELECT id, invoice_number, customer, grand, payment_status, payment_ref, delivery_status FROM invoices WHERE id = $1 OR invoice_number = $1",
+        [deliveryId]
+      );
+      if (invCheck.rows.length > 0) {
+        const row = invCheck.rows[0];
+        deliveryData = {
+          deliveryId: row.id,
+          invoiceNumber: row.invoice_number,
+          customer: row.customer,
+          grand: row.grand,
+          paymentStatus: row.payment_status || 'pending',
+          paymentRef: row.payment_ref || '',
+          deliveryStatus: row.delivery_status || 'pending'
+        };
+      }
+    }
+
+    if (!deliveryData) return res.status(404).json({ error: "Delivery not found" });
+    res.json({ success: true, data: deliveryData });
+  } catch (e: any) {
+    console.error("Delivery fetch error:", e);
+    res.status(500).json({ error: "Failed to fetch delivery data" });
+  }
+});
+
+// ─── Delivery Update (Public Rider Access via Token) ───────────────
 app.post("/api/delivery/update", async (req, res) => {
   const { deliveryId, status, token } = req.body;
   if (!deliveryId || !status || !token) return res.status(400).json({ error: "Missing required fields" });
@@ -366,29 +425,43 @@ app.post("/api/delivery/update", async (req, res) => {
   if (token !== `sec_${deliveryId}`) return res.status(403).json({ error: "Invalid delivery token" });
 
   try {
-    // Update Firebase public_deliveries for instant real-time sync across all devices
+    // 1. Update Firebase public_deliveries for instant real-time sync across all devices
     await fDb().collection("public_deliveries").doc(String(deliveryId)).set({
       deliveryStatus: status,
       updatedAt: Date.now()
     }, { merge: true });
 
+    // 2. Update local database invoice delivery status
+    await query(
+      "UPDATE invoices SET delivery_status = $1, updated_at = $2 WHERE id = $3",
+      [status, Date.now(), String(deliveryId)]
+    );
+
+    // 3. Update Firestore user-specific invoice and activity if invoice exists
+    const invCheck = await query("SELECT user_id, invoice_number FROM invoices WHERE id = $1", [deliveryId]);
+    if (invCheck.rows.length > 0) {
+      const userId = invCheck.rows[0].user_id;
+      const invoiceNumber = invCheck.rows[0].invoice_number;
+      await fDb().collection(`users/${userId}/invoices`).doc(String(deliveryId)).set({
+        deliveryStatus: status
+      }, { merge: true });
+      
+      const actId = 'act_' + Math.random().toString(36).substring(2, 9);
+      await query(
+        "INSERT INTO activity (id, user_id, text, type, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        [actId, userId, `Delivery status for ${invoiceNumber} updated to: ${status}`, "delivery", new Date().toISOString(), Date.now()]
+      );
+      await fDb().collection(`users/${userId}/activity`).doc(actId).set({
+        text: `Delivery status for ${invoiceNumber} updated to: ${status}`,
+        type: "delivery",
+        created_at: new Date().toISOString()
+      });
+    }
+
     res.json({ success: true, deliveryId, status });
   } catch (e: any) {
     console.error("Delivery update error:", e);
     res.status(500).json({ error: "Failed to update delivery status: " + e.message });
-  }
-});
-
-// ─── Delivery Info (Public Read) ───────────────────────────────────
-app.get("/api/delivery/:deliveryId", async (req, res) => {
-  const { deliveryId } = req.params;
-  try {
-    const doc = await fDb().collection("public_deliveries").doc(String(deliveryId)).get();
-    if (!doc.exists) return res.status(404).json({ error: "Delivery not found" });
-    res.json({ success: true, data: doc.data() });
-  } catch (e: any) {
-    console.error("Delivery fetch error:", e);
-    res.status(500).json({ error: "Failed to fetch delivery data" });
   }
 });
 
@@ -437,10 +510,10 @@ app.post("/api/sync/push", authenticate, async (req, res) => {
       for (const inv of invoices) {
         const itemsStr = typeof inv.items === 'string' ? inv.items : JSON.stringify(inv.items || []);
         await query(
-          `INSERT INTO invoices (id, user_id, invoice_number, date, customer, notes, type, items, subtotal, discount_pct, discount_amt, vat, grand, payment_status, payment_ref, paid_at, created_at, updated_at) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-           ON CONFLICT(id) DO UPDATE SET invoice_number=$3, date=$4, customer=$5, notes=$6, type=$7, items=$8, subtotal=$9, discount_pct=$10, discount_amt=$11, vat=$12, grand=$13, payment_status=$15, payment_ref=$16, paid_at=$17, created_at=$18, updated_at=$19`,
-          [String(inv.id), userId, inv.invoiceNumber, inv.date, inv.customer, inv.notes || '', inv.type, itemsStr, inv.subtotal, inv.discountPct, inv.discountAmt, inv.vat, inv.grand, inv.paymentStatus || '', inv.paymentRef || '', inv.paidAt || '', inv.createdAt, now]
+          `INSERT INTO invoices (id, user_id, invoice_number, date, customer, notes, type, items, subtotal, discount_pct, discount_amt, vat, vat_rate, grand, payment_status, payment_ref, paid_at, delivery_status, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+           ON CONFLICT(id) DO UPDATE SET invoice_number=$3, date=$4, customer=$5, notes=$6, type=$7, items=$8, subtotal=$9, discount_pct=$10, discount_amt=$11, vat=$12, vat_rate=$13, grand=$14, payment_status=$15, payment_ref=$16, paid_at=$17, delivery_status=$18, created_at=$19, updated_at=$20`,
+          [String(inv.id), userId, inv.invoiceNumber, inv.date, inv.customer, inv.notes || '', inv.type, itemsStr, inv.subtotal, inv.discountPct, inv.discountAmt, inv.vat, inv.vatRate || 0, inv.grand, inv.paymentStatus || '', inv.paymentRef || '', inv.paidAt || '', inv.deliveryStatus || 'pending', inv.createdAt, now]
         );
         // Sync new invoices to public_deliveries
         if (inv.type === 'invoice') {
@@ -566,7 +639,28 @@ app.post("/api/sync/pull", authenticate, async (req, res) => {
         location: r.location,
         image: r.image
       })),
-      invoices: invoicesResult.rows,
+      invoices: invoicesResult.rows.map(r => ({
+        id: r.id,
+        userId: r.user_id,
+        invoiceNumber: r.invoice_number,
+        date: r.date,
+        customer: r.customer,
+        notes: r.notes,
+        type: r.type,
+        items: r.items,
+        subtotal: r.subtotal,
+        discountPct: r.discount_pct,
+        discountAmt: r.discount_amt,
+        vat: r.vat,
+        vatRate: r.vat_rate,
+        grand: r.grand,
+        paymentStatus: r.payment_status || 'pending',
+        paymentRef: r.payment_ref || '',
+        paidAt: r.paid_at || '',
+        deliveryStatus: r.delivery_status || 'pending',
+        createdAt: r.created_at,
+        updatedAt: r.updated_at
+      })),
       settings: settingsResult.rows,
       activity: activityResult.rows,
       submissions: submissionsResult.rows
