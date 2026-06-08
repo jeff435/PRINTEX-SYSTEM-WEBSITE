@@ -441,9 +441,20 @@ window.initApp = async function() {
 
   try {
     const savedParts = await window.dbGet('parts') || [];
-    if (savedParts.length > 0) window.parts = savedParts;
+    const physicalParts = savedParts.filter(p => !p.isService);
+    if (physicalParts.length > 0) {
+      window.parts = savedParts;
+    } else {
+      console.log('[InitApp] No physical parts found in IndexedDB. Seeding defaults...');
+      if (typeof window.seedDefaultParts === 'function') {
+        await window.seedDefaultParts();
+      } else {
+        window.parts = window.DEFAULT_PARTS || [];
+      }
+    }
   } catch(e) {
     console.warn('[InitApp] Could not load parts:', e);
+    window.parts = window.DEFAULT_PARTS || [];
   }
 
   try {

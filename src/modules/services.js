@@ -480,27 +480,30 @@ window.createInvoiceForService = function(id) {
   const service = window.parts.find(p => String(p.id) === String(id));
   if (!service) return window.showToast('Service not found', 'error');
 
-  // Initialize invoice items if empty or not done
-  if (typeof window.initCreateInvoice === 'function') {
-    window.initCreateInvoice();
-  }
-
-  // Pre-add service to line items with customizable price
-  window.lineItems.push({
-    partId: service.id,
-    partNum: service.partNum,
-    desc: service.desc,
-    qty: 1,
-    price: service.priceKsh || 0,
-    isService: true
-  });
-
-  window.renderLineItems();
-  window.showToast(`✓ Pre-filled Service "${service.partNum}" in Invoice builder. You can customize the price now.`, 'success');
-
-  // Navigate to createInvoice page
+  // Navigate to createInvoice page FIRST so the DOM elements are visible
   const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'createInvoice'"));
   window.showPage('createInvoice', navEl);
+
+  // Short delay to allow the page to become visible in the DOM
+  setTimeout(() => {
+    // Initialize a fresh invoice
+    if (typeof window.initCreateInvoice === 'function') {
+      window.initCreateInvoice();
+    }
+
+    // Pre-add service to line items with customizable price
+    window.lineItems.push({
+      partId: service.id,
+      partNum: service.partNum,
+      desc: service.desc,
+      qty: 1,
+      price: service.priceKsh || 0,
+      isService: true
+    });
+
+    window.renderLineItems();
+    window.showToast(`✓ Service "${service.partNum}" added to invoice. Set the price and customer, then save.`, 'success');
+  }, 150);
 };
 
 // Pre-fill rider delivery form with service dispatch

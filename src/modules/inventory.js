@@ -33,10 +33,12 @@ window.stockStatus = function(p) {
 };
 
 window.renderInventory = function(filtered) {
-  const list = filtered || window.parts;
+  // Exclude service items from inventory — they have their own Services page
+  const physicalParts = (window.parts || []).filter(p => !p.isService);
+  const list = filtered || physicalParts;
   const body = document.getElementById('invBody');
   if (!body) return;
-  const lowCount = window.parts.filter(p => p.stock > 0 && p.stock <= (p.minStock || 1)).length;
+  const lowCount = physicalParts.filter(p => p.stock > 0 && p.stock <= (p.minStock || 1)).length;
   const badge = document.getElementById('lowBadge');
   if (badge) badge.textContent = lowCount;
 
@@ -92,7 +94,8 @@ window.filterInventory = function() {
   const q = (document.getElementById('invSearch')?.value || '').toLowerCase();
   const cat = document.getElementById('catFilter')?.value || '';
   const status = document.getElementById('statusFilter')?.value || '';
-  let f = window.parts;
+  // Only show physical parts in inventory (not services)
+  let f = (window.parts || []).filter(p => !p.isService);
   if (q) f = f.filter(p => {
     const pn = String(p.partNum||p.part_num||'').toLowerCase();
     const ds = String(p.desc||p.description||'').toLowerCase();

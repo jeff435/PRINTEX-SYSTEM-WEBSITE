@@ -561,16 +561,19 @@ window.initializeFirestoreListeners = async function(userId) {
         });
       } catch(e) {}
 
-      if (localData.length > 0) {
-        console.log(`[Firebase] Firestore '${store}' empty – found ${localData.length} local records. Migrating to cloud...`);
+      // Filter to non-deleted items for local data
+      const activeLocal = localData.filter(x => !x._deleted);
+
+      if (activeLocal.length > 0) {
+        console.log(`[Firebase] Firestore '${store}' empty – found ${activeLocal.length} local records. Migrating to cloud...`);
         const migrationKey = `printex_migrated_${store}_${userId}`;
         if (!localStorage.getItem(migrationKey)) {
           try {
             const BATCH_LIMIT = 499;
             let totalMigrated = 0;
 
-            for (let i = 0; i < localData.length; i += BATCH_LIMIT) {
-              const chunk = localData.slice(i, i + BATCH_LIMIT);
+            for (let i = 0; i < activeLocal.length; i += BATCH_LIMIT) {
+              const chunk = activeLocal.slice(i, i + BATCH_LIMIT);
               const batch = window.fDb.batch();
               let batchCount = 0;
 
@@ -583,7 +586,7 @@ window.initializeFirestoreListeners = async function(userId) {
                 }
                 cleanItem._synced = true;
                 cleanItem._migratedAt = Date.now();
-                cleanItem.ownerId = userId; // inject ownerId on migration
+                cleanItem.ownerId = userId;
                 const docRef = window.fDb.collection(`users/${userId}/${store}`).doc(docId);
                 batch.set(docRef, cleanItem, { merge: true });
                 batchCount++;
@@ -605,51 +608,51 @@ window.initializeFirestoreListeners = async function(userId) {
             console.warn('[Firebase] Batch migration failed:', e);
           }
         }
+        // Still update memory with local data so parts are visible immediately
+        if (store === 'parts') {
+          window.parts = activeLocal;
+          if (typeof window.renderInventory === 'function') window.renderInventory();
+        } else if (store === 'invoices') {
+          window.invoices = activeLocal;
+          if (typeof window.renderInvoiceList === 'function') window.renderInvoiceList();
+        } else if (store === 'activity') {
+          window.activityLog = activeLocal;
+        } else if (store === 'settings') {
+          window.settings = {};
+          activeLocal.forEach(s => window.settings[s.key] = s.value);
+          if (typeof window.applySettings === 'function') window.applySettings();
+        } else if (store === 'submissions') {
+          window.submissions = activeLocal;
+          if (typeof window.renderFreelancePage === 'function') window.renderFreelancePage();
+        }
+        if (typeof window.renderDashboard === 'function') window.renderDashboard();
+        if (typeof window.renderReports === 'function') window.renderReports();
+        if (typeof window.updateBottomNavBadge === 'function') window.updateBottomNavBadge();
+        window.updateSyncStatus('synced');
         return;
       }
       
-      // Clear IndexedDB store (except parts, which must always have at least default parts)
-      if (store !== 'parts') {
+      // Firestore AND local IndexedDB are both empty
+      if (store === 'parts') {
+        // CRITICAL: Never leave parts empty — always fall back to DEFAULT_PARTS
+        if (typeof window.DEFAULT_PARTS !== 'undefined' && window.DEFAULT_PARTS.length > 0) {
+          console.log('[updateAndRender] Both Firestore and IndexedDB empty for parts. Loading DEFAULT_PARTS (' + window.DEFAULT_PARTS.length + ' items).');
+          window.parts = window.DEFAULT_PARTS.map(dp => ({ ...dp, id: String(dp.id) }));
+          // Seed to IndexedDB + Firestore in background
+          if (typeof window.seedDefaultParts === 'function') {
+            window.seedDefaultParts().catch(e => console.error('[updateAndRender] Background seed failed:', e));
+          }
+        }
+        if (typeof window.renderInventory === 'function') window.renderInventory();
+      } else if (store !== 'parts') {
+        // Clear IndexedDB for non-parts stores
         try {
           const tx = window.db.transaction(store, 'readwrite');
           tx.objectStore(store).clear();
         } catch(e) {}
-      } else {
-        // For parts, if Firestore is empty, we should ensure we have at least the default parts!
-        try {
-          let localPartsCount = 0;
-          await new Promise((resolve) => {
-            const tx = window.db.transaction('parts', 'readonly');
-            const req = tx.objectStore('parts').count();
-            req.onsuccess = () => { localPartsCount = req.result; resolve(); };
-            req.onerror = () => resolve();
-          });
-          if (localPartsCount === 0 && typeof window.seedDefaultParts === 'function') {
-            console.log('[updateAndRender] Parts count is 0. Reseeding defaults...');
-            await window.seedDefaultParts();
-          }
-        } catch(e) {}
       }
 
-      if (store === 'parts') {
-        // Load parts from IndexedDB rather than setting to empty
-        let localDataParts = [];
-        try {
-          await new Promise((resolve) => {
-            const tx = window.db.transaction('parts', 'readonly');
-            const req = tx.objectStore('parts').getAll();
-            req.onsuccess = () => { localDataParts = req.result || []; resolve(); };
-            req.onerror = () => resolve();
-          });
-        } catch(e) {}
-        if (localDataParts.length > 0) {
-          window.parts = localDataParts;
-        } else {
-          window.parts = window.DEFAULT_PARTS || [];
-        }
-        if (typeof window.renderInventory === 'function') window.renderInventory();
-      }
-      else if (store === 'invoices') { window.invoices = []; if (typeof window.renderInvoiceList === 'function') window.renderInvoiceList(); }
+      if (store === 'invoices') { window.invoices = []; if (typeof window.renderInvoiceList === 'function') window.renderInvoiceList(); }
       else if (store === 'activity') { window.activityLog = []; }
       else if (store === 'settings') { window.settings = {}; }
       else if (store === 'submissions') { window.submissions = []; if (typeof window.renderFreelancePage === 'function') window.renderFreelancePage(); }
@@ -733,7 +736,12 @@ window.initializeFirestoreListeners = async function(userId) {
     }
 
     if (store === 'parts') {
-      window.parts = mergedData;
+      // SAFETY: Never set window.parts to empty if we have DEFAULT_PARTS available
+      if (mergedData.length === 0 && typeof window.DEFAULT_PARTS !== 'undefined' && window.DEFAULT_PARTS.length > 0) {
+        console.warn('[updateAndRender] Merged data for parts is empty. Keeping existing window.parts (' + window.parts.length + ' items).');
+      } else {
+        window.parts = mergedData;
+      }
       if (typeof window.renderInventory === 'function') window.renderInventory();
     } else if (store === 'invoices') {
       window.invoices = mergedData;
