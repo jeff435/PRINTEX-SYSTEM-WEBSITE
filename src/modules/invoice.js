@@ -375,6 +375,18 @@ window.renderInvoiceList = function(filtered) {
 
   const body = document.getElementById('invoiceListBody');
   if (!body) return;
+  if (list.length === 0) {
+    body.innerHTML = `<tr>
+      <td colspan="9">
+        <div class="empty-state-container" style="padding: 40px; text-align: center;">
+          <img src="/public/empty_state.png" class="empty-state-img" alt="No invoices found" style="max-width: 160px; height: auto; animation: float 5s ease-in-out infinite;" />
+          <h3 style="margin: 15px 0 5px; color: var(--accent); font-size: 1.25rem;">No Finalized Invoices</h3>
+          <p style="color: var(--muted); font-size: 0.9rem; max-width: 400px; margin: 0 auto;">There are no finalized invoices matching the criteria.</p>
+        </div>
+      </td>
+    </tr>`;
+    return;
+  }
   body.innerHTML = [...list].reverse().map(inv => {
     const isPaid = inv.paymentStatus === 'paid';
     const payBtn = isPaid
@@ -402,7 +414,7 @@ window.renderInvoiceList = function(filtered) {
         </div>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--dim);padding:24px">No finalized invoices yet</td></tr>';
+  }).join('');
 };
 
 window.filterInvoiceList = function() {
@@ -452,6 +464,18 @@ window.renderQuotationList = function(filtered) {
 
   const body = document.getElementById('quotationListBody');
   if (!body) return;
+  if (list.length === 0) {
+    body.innerHTML = `<tr>
+      <td colspan="9">
+        <div class="empty-state-container" style="padding: 40px; text-align: center;">
+          <img src="/public/empty_state.png" class="empty-state-img" alt="No quotations found" style="max-width: 160px; height: auto; animation: float 5s ease-in-out infinite;" />
+          <h3 style="margin: 15px 0 5px; color: var(--accent); font-size: 1.25rem;">No Proforma Quotations</h3>
+          <p style="color: var(--muted); font-size: 0.9rem; max-width: 400px; margin: 0 auto;">There are no proforma quotations matching the criteria.</p>
+        </div>
+      </td>
+    </tr>`;
+    return;
+  }
   body.innerHTML = [...list].reverse().map(inv => {
     return `
     <tr id="inv-row-${inv.id}">
@@ -474,7 +498,7 @@ window.renderQuotationList = function(filtered) {
         </div>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--dim);padding:24px">No proforma quotations yet</td></tr>';
+  }).join('');
 };
 
 window.filterQuotationList = function() {

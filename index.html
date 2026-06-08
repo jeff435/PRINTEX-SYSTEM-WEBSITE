@@ -634,6 +634,209 @@ input[title]:hover::before,select[title]:hover::before{display:none}
 .analytics-empty{text-align:center;padding:60px 20px;color:var(--dim)}
 .analytics-empty i{font-size:40px;margin-bottom:12px;display:block;color:var(--border2)}
 @media(max-width:700px){.analytics-stats-row{grid-template-columns:1fr 1fr}.analytics-kpi-bar{grid-template-columns:1fr 1fr}}
+
+/* ── VISUAL OVERHAUL EXTRA ANIMATIONS & STYLES ── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--bg3) 25%, var(--surface) 50%, var(--bg3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 10px var(--accent-glow); }
+  50% { box-shadow: 0 0 25px rgba(0,212,255,0.4); }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes blink {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+.floating-element {
+  animation: float 4s ease-in-out infinite;
+}
+.glow-effect {
+  animation: pulseGlow 3s infinite;
+}
+.fade-in-up {
+  animation: fadeInUp 0.4s ease-out forwards;
+}
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+.stagger-5 { animation-delay: 0.25s; }
+
+/* Cards hover animations */
+.card, .kpi-card, .analytics-kpi, .analytics-card {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.25s, box-shadow 0.25s !important;
+}
+.card:hover, .kpi-card:hover, .analytics-kpi:hover, .analytics-card:hover {
+  transform: translateY(-4px) scale(1.01);
+  border-color: var(--accent);
+  box-shadow: 0 12px 30px rgba(0, 212, 255, 0.12) !important;
+}
+
+/* IMAP Sync Status Panel */
+.sync-status-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  width: 280px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  box-shadow: var(--shadow-lg);
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 1000;
+  font-family: var(--font-body);
+  color: var(--text);
+  cursor: default;
+}
+.sync-status-panel.active {
+  display: flex;
+  animation: fadeInUp 0.2s ease forwards;
+}
+
+/* Animated empty states */
+.empty-state-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+}
+.empty-state-img {
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+  margin-bottom: 20px;
+  animation: float 5s ease-in-out infinite;
+  border-radius: 12px;
+  border: 1px solid var(--border2);
+}
+
+/* Login screen visuals */
+#loginScreen {
+  background: radial-gradient(circle at center, var(--bg2) 0%, var(--bg) 100%) !important;
+  position: relative;
+  overflow: hidden;
+}
+#loginScreen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url('/public/login_bg.png') no-repeat center center;
+  background-size: cover;
+  opacity: 0.18;
+  filter: blur(2px);
+  z-index: 1;
+}
+#loginScreen::after {
+  content: '';
+  position: absolute;
+  width: 200%;
+  height: 200%;
+  top: -50%;
+  left: -50%;
+  background: radial-gradient(circle, rgba(124,58,237,0.08) 0%, transparent 60%);
+  animation: rotateGlow 20s linear infinite;
+  z-index: 2;
+  pointer-events: none;
+}
+@keyframes rotateGlow {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.login-card {
+  position: relative;
+  z-index: 10;
+  backdrop-filter: blur(20px);
+  background: rgba(17, 34, 54, 0.75) !important;
+  border: 1px solid rgba(0, 212, 255, 0.25) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 212, 255, 0.15) !important;
+  overflow: hidden;
+}
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(45deg, transparent, rgba(0,212,255,0.1), transparent);
+  transform: rotate(45deg);
+  animation: loginShimmer 6s infinite linear;
+  pointer-events: none;
+}
+@keyframes loginShimmer {
+  0% { transform: translate(-30%, -30%) rotate(45deg); }
+  100% { transform: translate(30%, 30%) rotate(45deg); }
+}
+
+/* Page transitions */
+.page {
+  animation: fadeInUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Hero dashboard banner */
+.dashboard-hero-banner {
+  background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(124,58,237,0.15));
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.dashboard-hero-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(45deg, var(--accent-glow), transparent);
+  opacity: 0.5;
+  z-index: 1;
+}
+.dashboard-hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 60%;
+}
+.dashboard-hero-img {
+  width: 220px;
+  height: 140px;
+  object-fit: contain;
+  position: relative;
+  z-index: 2;
+  animation: float 6s ease-in-out infinite;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border2);
+  box-shadow: var(--shadow-lg);
+}
 </style>
 </head>
 <body>
@@ -829,10 +1032,19 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="page-title-bar" id="pageTitleBar">Dashboard</div>
     </div>
     <div class="topbar-right" style="display:flex;align-items:center;gap:10px">
-      <div id="syncIndicator" style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:5px 10px;border-radius:20px;background:var(--bg3);border:1px solid var(--border2);cursor:pointer;user-select:none;transition:all 0.2s" onclick="triggerManualSync()" title="Click to synchronize now">
+      <div id="syncIndicator" style="position:relative;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:5px 10px;border-radius:20px;background:var(--bg3);border:1px solid var(--border2);cursor:pointer;user-select:none;transition:all 0.2s" onclick="window.toggleSyncPanel(event)" title="Click to view sync status">
         <i id="syncIcon" class="fa fa-cloud" style="color:var(--success)"></i>
         <span id="syncText" style="color:var(--text);font-size:11px">Synced</span>
         <div class="sync-dot" style="margin:0;width:6px;height:6px;background:var(--success)"></div>
+        <div id="syncStatusPanel" class="sync-status-panel" onclick="event.stopPropagation()">
+          <div class="sync-status-header">
+            <span>🔄 IMAP Sync Status</span>
+            <button class="btn btn-xs" onclick="window.toggleSyncPanel(event)" style="background:transparent;border:none;color:var(--muted);padding:0;cursor:pointer"><i class="fa fa-times"></i></button>
+          </div>
+          <div class="sync-status-list" style="margin-top:8px">
+            <div style="font-size:11px;color:var(--muted);text-align:center;padding:10px 0">Loading mailbox state...</div>
+          </div>
+        </div>
       </div>
       <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme"><i class="fa fa-circle-half-stroke"></i></button>
       <button class="icon-btn" onclick="exportBackup()" title="Export backup"><i class="fa fa-download"></i></button>
@@ -842,6 +1054,14 @@ input[title]:hover::before,select[title]:hover::before{display:none}
 
     <!-- DASHBOARD -->
     <div class="page active fade-in" id="page-dashboard">
+      <!-- Premium Hero Banner -->
+      <div class="dashboard-hero-banner fade-in-up stagger-1">
+        <div class="dashboard-hero-content">
+          <h2 style="font-family:var(--font-display);font-size:24px;font-weight:800;color:#fff;margin-bottom:8px">Welcome back to PRINTEX</h2>
+          <p style="font-size:13px;color:var(--muted);line-height:1.5">You are connected to the central database. Heartbeat is active, and IMAP synchronization is running in the background. Ready to optimize your workflow?</p>
+        </div>
+        <img class="dashboard-hero-img" src="/public/dashboard_hero.png" alt="Printex Machinery" />
+      </div>
       <div class="kpi-grid" id="kpiGrid"></div>
       <div class="dash-charts">
         <div class="card">

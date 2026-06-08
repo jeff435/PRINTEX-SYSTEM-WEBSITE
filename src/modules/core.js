@@ -88,8 +88,17 @@ window.openDB = function() {
   });
 };
 
-window.dbGet = function(store, key) {
+window.dbGet = function(store, key, includeDeleted) {
   return new Promise((resolve, reject) => {
+    const filterDeleted = (res) => {
+      if (includeDeleted) return res;
+      if (Array.isArray(res)) {
+        return res.filter(x => !x._deleted);
+      }
+      if (res && res._deleted) return null;
+      return res;
+    };
+
     const handleFallback = () => {
       try {
         const localData = localStorage.getItem('printex_fallback_' + store);
@@ -97,15 +106,15 @@ window.dbGet = function(store, key) {
           const parsed = JSON.parse(localData);
           if (key !== undefined) {
             const item = parsed.find(x => String(store === 'settings' ? x.key : x.id) === String(key));
-            return resolve(item || null);
+            return resolve(filterDeleted(item || null));
           }
-          return resolve(parsed);
+          return resolve(filterDeleted(parsed));
         }
       } catch (err) {
         console.warn(`[dbGet Fallback] LocalStorage fallback read failed for store ${store}:`, err);
       }
       if (key !== undefined) return resolve(null);
-      if (store === 'parts') return resolve(window.DEFAULT_PARTS || []);
+      if (store === 'parts') return resolve(filterDeleted(window.DEFAULT_PARTS || []));
       return resolve([]);
     };
 
@@ -119,7 +128,7 @@ window.dbGet = function(store, key) {
           } else if (key !== undefined && !req.result) {
             handleFallback();
           } else {
-            resolve(req.result);
+            resolve(filterDeleted(req.result));
           }
         };
         req.onerror = () => handleFallback();
@@ -136,7 +145,7 @@ window.dbGet = function(store, key) {
         } else if (key !== undefined && !req.result) {
           handleFallback();
         } else {
-          resolve(req.result);
+          resolve(filterDeleted(req.result));
         }
       };
       req.onerror = () => handleFallback();
@@ -204,6 +213,13 @@ window.dbPut = function(store, value) {
   } else if (store === 'settings') {
     if (!value.key) value.key = String(value.id);
   }
+
+  // IMAP-style flags
+  value._seen = value._seen !== undefined ? value._seen : true;
+  value._deleted = value._deleted !== undefined ? value._deleted : false;
+  value._flagged = value._flagged !== undefined ? value._flagged : false;
+  value._draft = value._draft !== undefined ? value._draft : false;
+  value._modSeq = value._modSeq || 0;
 
   value._synced = false;
   value._lastUpdated = Date.now();
@@ -288,16 +304,83 @@ window.dbDelete = function(store, key) {
     }
   }, 100);
 
-  return new Promise((res, rej) => {
+  return new Promise(async (res, rej) => {
     if (!window.db) return res();
-    const tx = window.db.transaction(store, 'readwrite');
-    const req = tx.objectStore(store).delete(key);
-    req.onsuccess = () => {
-      window.triggerSyncBroadcast(store);
-      res();
-    };
-    req.onerror = () => rej(req.error);
+    try {
+      const record = await new Promise((resolve) => {
+        const tx = window.db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      });
+
+      if (record) {
+        record._deleted = true;
+        record._synced = false;
+        record._lastUpdated = Date.now();
+        
+        const tx = window.db.transaction(store, 'readwrite');
+        const req = tx.objectStore(store).put(record);
+        req.onsuccess = () => {
+          window.triggerSyncBroadcast(store);
+          if (typeof window.triggerDelayedSync === 'function') {
+            window.triggerDelayedSync();
+          }
+          res();
+        };
+        req.onerror = () => rej(req.error);
+      } else {
+        res();
+      }
+    } catch (e) {
+      rej(e);
+    }
   });
+};
+
+window.dbFlagRecord = async function(store, id, flag, value) {
+  try {
+    const record = await new Promise((resolve, reject) => {
+      if (!window.db) return reject(new Error('IndexedDB not initialized'));
+      const tx = window.db.transaction(store, 'readonly');
+      const req = tx.objectStore(store).get(id);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+
+    if (record) {
+      record[flag] = value;
+      record._synced = false;
+      record._lastUpdated = Date.now();
+      await window.dbPut(store, record);
+      return true;
+    }
+  } catch(e) {
+    console.error(`[dbFlagRecord] Failed to flag record in ${store}/${id}:`, e);
+  }
+  return false;
+};
+
+window.getMailboxStatus = async function(store) {
+  try {
+    const records = await new Promise((resolve) => {
+      if (!window.db) return resolve([]);
+      const tx = window.db.transaction(store, 'readonly');
+      const req = tx.objectStore(store).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => resolve([]);
+    });
+
+    const total = records.filter(r => !r._deleted).length;
+    const unseen = records.filter(r => !r._seen && !r._deleted).length;
+    const flagged = records.filter(r => r._flagged && !r._deleted).length;
+    const deleted = records.filter(r => r._deleted).length;
+
+    return { total, unseen, flagged, deleted };
+  } catch(e) {
+    console.error(`[getMailboxStatus] Error for ${store}:`, e);
+    return { total: 0, unseen: 0, flagged: 0, deleted: 0 };
+  }
 };
 
 window.dbClear = function(store) {
@@ -619,8 +702,14 @@ window.initializeFirestoreListeners = async function(userId) {
             }
           }
 
-          // 2. Put/update all Firestore items locally and mark them as synced
+          // 2. Put/update all Firestore items locally and mark them as synced, but respect newer local unsynced changes
           for (const item of firestoreData) {
+            const itemId = store === 'settings' ? String(item.key || item.id) : String(item.id);
+            const localItem = localData.find(l => (store === 'settings' ? String(l.key || l.id) : String(l.id)) === itemId);
+            if (localItem && localItem._synced === false && (localItem._lastUpdated || 0) > (item._lastUpdated || 0)) {
+              console.log(`[Sync Merge] Keeping local changes for ${store}/${itemId} (local newer: ${localItem._lastUpdated} > ${item._lastUpdated})`);
+              continue;
+            }
             const cleanItem = { ...item, _synced: true };
             os.put(cleanItem);
           }

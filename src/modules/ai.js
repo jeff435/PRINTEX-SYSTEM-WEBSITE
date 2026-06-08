@@ -208,13 +208,31 @@ window.updateAIStatus = function(online) {
 };
 
 window.simulateClaudeMockResponse = async function(messages) {
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  // Near-instant response
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   const userMsg = messages[messages.length - 1]?.content || '';
   const text = (typeof userMsg === 'string') ? userMsg : (userMsg.find(c => c.type === 'text')?.text || '');
   const query = text.toLowerCase().trim();
 
-  if (query.includes('show reports') || query.includes('view report') || query.includes('go to reports') || query.includes('report page')) {
+  // Fuzzy match helper
+  const getScore = function(pattern) {
+    if (query.includes(pattern)) return 1.0;
+    var queryWords = query.split(/[\s,\.\?\!]+/);
+    var patternWords = pattern.split(/\s+/);
+    var matches = 0;
+    patternWords.forEach(function(w) {
+      if (queryWords.indexOf(w) !== -1) matches++;
+    });
+    return matches / patternWords.length;
+  };
+  
+  const matches = function(pattern, threshold) {
+    return getScore(pattern) >= (threshold || 0.6);
+  };
+
+  // 1. Navigation: Reports
+  if (matches('show reports') || matches('view report') || matches('go to reports') || matches('report page') || matches('business charts')) {
     return `I have navigated to the **Reports & Business Analytics** view for you. Here you can see your real-time stock status breakdown, categorised asset counts, monthly invoicing trends, and low-stock parts reports.
     \`\`\`json-action
     {
@@ -223,7 +241,9 @@ window.simulateClaudeMockResponse = async function(messages) {
     }
     \`\`\``;
   }
-  if (query.includes('show invoice') || query.includes('go to invoices') || query.includes('view invoices') || query.includes('invoice list')) {
+
+  // 2. Navigation: Invoices List
+  if (matches('show invoice') || matches('go to invoices') || matches('view invoices') || matches('invoice list') || matches('billing list')) {
     return `I have opened your **Invoices & Quotations** dashboard. You can search parts, process payments, print PDF copies, or manage existing invoices from here.
     \`\`\`json-action
     {
@@ -232,7 +252,9 @@ window.simulateClaudeMockResponse = async function(messages) {
     }
     \`\`\``;
   }
-  if (query.includes('new invoice') || query.includes('create invoice') || query.includes('create quotation') || query.includes('go to new invoice')) {
+
+  // 3. Navigation: New Invoice Form
+  if (matches('new invoice') || matches('create invoice') || matches('create quotation') || matches('go to new invoice') || matches('add bill')) {
     return `Opening the **Invoice Creator** tool. You can search parts by keyword/SKU, insert quantities, apply customizable discount percentages, and save immediately as a PDF quotation or invoice.
     \`\`\`json-action
     {
@@ -241,7 +263,9 @@ window.simulateClaudeMockResponse = async function(messages) {
     }
     \`\`\``;
   }
-  if (query.includes('go to inventory') || query.includes('show inventory') || query.includes('view parts') || query.includes('part list') || query.includes('inventory page')) {
+
+  // 4. Navigation: Inventory Panel
+  if (matches('go to inventory') || matches('show inventory') || matches('view parts') || matches('part list') || matches('inventory page') || matches('warehouse stock')) {
     return `Navigating to your **Parts Inventory** control panel. Here you can view existing stock status, adjust item quantities on-the-fly, edit descriptions, or add new parts.
     \`\`\`json-action
     {
@@ -250,7 +274,9 @@ window.simulateClaudeMockResponse = async function(messages) {
     }
     \`\`\``;
   }
-  if (query.includes('freelance') || query.includes('task submission') || query.includes('submit task') || query.includes('reviewer board')) {
+
+  // 5. Navigation: Freelance page
+  if (matches('freelance') || matches('task submission') || matches('submit task') || matches('reviewer board') || matches('rider tasks')) {
     return `Opening the **Freelance Submissions** dashboard. Here you can submit new freelance task details, view review status in real-time, or manage reviewer feedback.
     \`\`\`json-action
     {
@@ -259,7 +285,9 @@ window.simulateClaudeMockResponse = async function(messages) {
     }
     \`\`\``;
   }
-  if (query.includes('go to settings') || query.includes('show settings') || query.includes('view settings')) {
+
+  // 6. Navigation: Settings
+  if (matches('go to settings') || matches('show settings') || matches('view settings') || matches('config panel')) {
     return `Opening **System Settings**. Here you can change default VAT tax rates, switch currency display (Ksh / USD), edit company Tax PIN, configure custom keys, or adjust themes.
     \`\`\`json-action
     {
@@ -269,7 +297,243 @@ window.simulateClaudeMockResponse = async function(messages) {
     \`\`\``;
   }
 
-  if (query.includes('add part') || query.includes('create part') || query.includes('new part')) {
+  // 7. Action: Delete Part
+  if (matches('delete part') || matches('remove part') || matches('destroy SKU') || matches('delete SKU')) {
+    let matchedPart = null;
+    for (var i = 0; i < window.parts.length; i++) {
+      var p = window.parts[i];
+      if (query.includes(p.partNum.toLowerCase()) || query.includes(String(p.id).toLowerCase())) {
+        matchedPart = p;
+        break;
+      }
+    }
+    if (matchedPart) {
+      return `⚠️ **Are you sure?** I have identified the part **${matchedPart.partNum}** (${matchedPart.desc}) for deletion. I can execute the IMAP soft-delete to flag it as deleted and expunge it during the next sync.
+      
+      \`\`\`json-action
+      {
+        "action": "delete_part",
+        "data": {
+          "id": "${matchedPart.id}"
+        }
+      }
+      \`\`\``;
+    } else {
+      return `I recognized a request to delete a part, but I couldn't find a matching SKU or ID in your query. Please provide the SKU (e.g., *delete part SKU-123*).`;
+    }
+  }
+
+  // 8. Analysis: Cheapest Part
+  if (matches('find cheapest part') || matches('cheapest part') || matches('lowest price') || matches('least cost')) {
+    if (!window.parts || window.parts.length === 0) return `Inventory is currently empty.`;
+    let cheapest = window.parts[0];
+    window.parts.forEach(function(p) {
+      if (p.priceKsh < cheapest.priceKsh) cheapest = p;
+    });
+    return `🔍 The cheapest part in inventory is **${cheapest.partNum}** (${cheapest.desc}).
+*   **Price:** ${window.formatPrice(cheapest.priceKsh)}
+*   **Current Stock:** ${cheapest.stock} units
+*   **Location:** ${cheapest.location || 'N/A'}`;
+  }
+
+  // 9. Analysis: Most Expensive Part
+  if (matches('most expensive part') || matches('highest price') || matches('priciest part') || matches('top cost')) {
+    if (!window.parts || window.parts.length === 0) return `Inventory is currently empty.`;
+    let expensive = window.parts[0];
+    window.parts.forEach(function(p) {
+      if (p.priceKsh > expensive.priceKsh) expensive = p;
+    });
+    return `🔍 The most expensive part in inventory is **${expensive.partNum}** (${expensive.desc}).
+*   **Price:** ${window.formatPrice(expensive.priceKsh)}
+*   **Current Stock:** ${expensive.stock} units
+*   **Location:** ${expensive.location || 'N/A'}`;
+  }
+
+  // 10. Analysis: Reorder Needed Parts
+  if (matches('which parts need reorder') || matches('reorder parts') || matches('under stock') || matches('low stock list')) {
+    const lowStockParts = window.parts.filter(function(p) { return p.stock <= (p.minStock || 2); });
+    if (lowStockParts.length === 0) {
+      return `✅ All parts are well-stocked! No parts are currently below their minimum stock thresholds.`;
+    }
+    let listStr = lowStockParts.slice(0, 8).map(function(p) { return `*   **${p.partNum}** (Stock: ${p.stock}/${p.minStock || 2})`; }).join('\n');
+    if (lowStockParts.length > 8) listStr += `\n*   *and ${lowStockParts.length - 8} more...*`;
+    return `⚠️ **The following ${lowStockParts.length} parts are below their minimum stock threshold and need reordering:**
+${listStr}
+
+Would you like me to open the **Reports** panel for a detailed view?`;
+  }
+
+  // 11. Analysis: Category Breakdown
+  if (matches('show category breakdown') || matches('categories') || matches('category split')) {
+    const catMap = {};
+    window.parts.forEach(function(p) {
+      catMap[p.category] = (catMap[p.category] || 0) + 1;
+    });
+    let result = `📦 **Inventory Categories Breakdown:**\n`;
+    Object.keys(catMap).forEach(function(cat) {
+      result += `*   **Category ${cat}:** ${catMap[cat]} SKU(s)\n`;
+    });
+    return result;
+  }
+
+  // 12. Analysis: Last Invoice Details
+  if (matches('when was last invoice') || matches('last invoice') || matches('recent bill') || matches('latest transaction')) {
+    if (!window.invoices || window.invoices.length === 0) return `No invoices found in database.`;
+    let lastInv = window.invoices[0];
+    window.invoices.forEach(function(i) {
+      if (new Date(i.date) > new Date(lastInv.date)) lastInv = i;
+    });
+    return `📄 **Details of the most recent Invoice / Quotation:**
+*   **Document ID:** ${lastInv.invoiceNumber || lastInv.id}
+*   **Customer:** ${lastInv.customer}
+*   **Total Amount:** ${window.formatPrice(lastInv.grand)}
+*   **Status:** ${lastInv.paymentStatus || 'Pending'}
+*   **Date:** ${new Date(lastInv.date).toLocaleDateString()}`;
+  }
+
+  // 13. Analysis: General Report Summary
+  if (matches('generate report summary') || matches('business summary') || matches('overall report')) {
+    const totalParts = window.parts.length;
+    const totalInvoices = window.invoices.length;
+    const totalStockVal = window.parts.reduce(function(s, p) { return s + (p.stock * p.priceKsh); }, 0);
+    const invoiceVal = window.invoices.reduce(function(s, i) { return s + i.grand; }, 0);
+    return `📊 **PRINTEX Engineers Executive Business Summary:**
+*   **Catalog Size:** ${totalParts} unique SKUs
+*   **Total Inventory Value:** ${window.formatPrice(totalStockVal)}
+*   **Total Invoices Created:** ${totalInvoices}
+*   **Total Invoiced Value:** ${window.formatPrice(invoiceVal)}
+*   **IMAP Sync Epoch:** ${window.getMailboxState('parts').uidValidity} (UIDVALIDITY OK)
+*   **Heartbeat Status:** Online & Idle`;
+  }
+
+  // 14. Action: Search Parts
+  if (query.startsWith('search for ') || query.startsWith('find ') || query.startsWith('lookup ')) {
+    const keyword = query.replace(/^(search for|find|lookup)\s+/i, '');
+    const results = window.parts.filter(function(p) { return p.partNum.toLowerCase().indexOf(keyword) !== -1 || p.desc.toLowerCase().indexOf(keyword) !== -1; });
+    if (results.length === 0) return `🔍 No parts found matching the keyword "**${keyword}**".`;
+    let response = `🔍 **I found ${results.length} matching parts in inventory:**\n`;
+    results.slice(0, 5).forEach(function(p) {
+      response += `*   **${p.partNum}** — ${p.desc} (${window.formatPrice(p.priceKsh)}, Stock: ${p.stock})\n`;
+    });
+    if (results.length > 5) response += `*   *and ${results.length - 5} more...*`;
+    return response;
+  }
+
+  // 15. Help
+  if (matches('help') || matches('what can you do') || matches('what are the commands') || matches('features list')) {
+    return `🤖 **Here is a list of dynamic operations I can assist with:**
+1.  **Navigation:** *"Go to Inventory"*, *"View Invoices"*, *"Open Reports"*, *"Show Settings"*, *"Open Freelance Page"*
+2.  **Inventory Management:** *"Add part SKU-123, description Valve, stock 15, price 3000"*, *"Set stock level of SKU-123 to 50"*, *"Delete part SKU-123"*
+3.  **Data Analytics:** *"Show category breakdown"*, *"Cheapest part"*, *"Most expensive part"*, *"What needs reordering?"*
+4.  **Sales Summaries:** *"Total billing revenue"*, *"When was the last invoice?"*, *"Business summary report"*
+5.  **Synchronization:** *"Show sync status"*, *"Trigger manual synchronization"*
+6.  **System Operations:** *"Toggle sidebar"*, *"Toggle theme"*, *"Export backup"*`;
+  }
+
+  // 16. Action: Sync status
+  if (matches('sync status') || matches('how is the system') || matches('is it synced') || matches('mailbox status')) {
+    return `🔄 **IMAP Synchronization Mailboxes Status:**
+*   **INBOX.parts:** UIDVALIDITY=${window.getMailboxState('parts').uidValidity}, Last Sync=${new Date(window.getMailboxState('parts').lastSync).toLocaleTimeString('en-KE')}
+*   **INBOX.invoices:** UIDVALIDITY=${window.getMailboxState('invoices').uidValidity}, Last Sync=${new Date(window.getMailboxState('invoices').lastSync).toLocaleTimeString('en-KE')}
+*   **INBOX.submissions:** UIDVALIDITY=${window.getMailboxState('submissions').uidValidity}, Last Sync=${new Date(window.getMailboxState('submissions').lastSync).toLocaleTimeString('en-KE')}
+*   **Sync Heartbeat:** Running (Idle, 15s intervals)`;
+  }
+
+  // 17. Action: Suggest Reorders
+  if (matches('suggest reorder quantities') || matches('reorder suggest') || matches('restock advice')) {
+    const lowStockParts = window.parts.filter(function(p) { return p.stock <= (p.minStock || 2); });
+    if (lowStockParts.length === 0) return `Inventory levels are healthy! No restock is suggested at this time.`;
+    let response = `📦 **Restock Recommendations & Suggested Reorder Quantities:**\n`;
+    lowStockParts.slice(0, 5).forEach(function(p) {
+      const suggest = (p.minStock || 2) * 5 - p.stock;
+      response += `*   **${p.partNum}**: Suggested reorder **${suggest}** units (bringing stock up to ${(p.minStock || 2) * 5})\n`;
+    });
+    return response;
+  }
+
+  // 18. Action: Greetings
+  if (matches('hi') || matches('hello') || matches('hey') || matches('greetings') || matches('sup')) {
+    return `👋 **Hello! I'm your Printex AI Assistant.** I'm ready to assist you with inventory management, sales reports, M-Pesa payments, and sync monitoring! Try asking: *"What is our inventory valuation?"*`;
+  }
+
+  // 19. Action: Thanks
+  if (matches('thank you') || matches('thanks') || matches('perfect') || matches('awesome') || matches('nice work')) {
+    return `You're very welcome! I'm happy to help. Let me know if you need to perform other inventory actions or sync tasks! 😊`;
+  }
+
+  // 20. Action: Who are you
+  if (matches('who are you') || matches('who is this') || matches('your name')) {
+    return `I am your **Printex Intelligent Business Engine**. I help you manage local data, trigger cloud backups, analyze invoice metrics, and synchronize records across your team.`;
+  }
+
+  // 21. Action: Riders statistics
+  if (matches('riders') || matches('active riders') || matches('submissions count')) {
+    const totalSubs = window.submissions.length;
+    const pendingSubs = window.submissions.filter(function(s) { return s.status === 'Pending'; }).length;
+    const approvedSubs = window.submissions.filter(function(s) { return s.status === 'Approved'; }).length;
+    return `🚴 **Rider & Submissions Statistics:**
+*   **Total Task Submissions:** ${totalSubs}
+*   **Pending Review:** ${pendingSubs} tasks
+*   **Approved Tasks:** ${approvedSubs} tasks`;
+  }
+
+  // 22. Action: Pending submissions
+  if (matches('pending submissions') || matches('needs review') || matches('review queue') || matches('pending tasks')) {
+    const pendings = window.submissions.filter(function(s) { return s.status === 'Pending'; });
+    if (pendings.length === 0) return `✅ No pending submissions! The review queue is clear.`;
+    let response = `📋 **Tasks pending admin review:**\n`;
+    pendings.slice(0, 5).forEach(function(s) {
+      response += `*   **${s.invoice_number || 'N/A'}** — ${s.project_description || 'No description'} (Value: ${window.formatPrice(s.totals)})\n`;
+    });
+    return response;
+  }
+
+  // 23. Action: Toggle Theme
+  if (matches('toggle theme') || matches('dark mode') || matches('light mode') || matches('switch theme')) {
+    return `Toggling system theme...
+    \`\`\`json-action
+    {
+      "action": "toggle_theme",
+      "data": {}
+    }
+    \`\`\``;
+  }
+
+  // 24. Action: Toggle Sidebar
+  if (matches('toggle sidebar') || matches('collapse menu') || matches('hide sidebar')) {
+    return `Toggling sidebar visibility...
+    \`\`\`json-action
+    {
+      "action": "toggle_sidebar",
+      "data": {}
+    }
+    \`\`\``;
+  }
+
+  // 25. Action: Export Backup
+  if (matches('backup') || matches('export backup') || matches('download data')) {
+    return `Preparing data backup file download...
+    \`\`\`json-action
+    {
+      "action": "export_backup",
+      "data": {}
+    }
+    \`\`\``;
+  }
+
+  // 26. Analysis: Supplier List
+  if (matches('supplier list') || matches('who are the suppliers') || matches('partners list')) {
+    const suppliers = {};
+    window.parts.forEach(function(p) {
+      if (p.supplier) suppliers[p.supplier] = true;
+    });
+    const list = Object.keys(suppliers);
+    if (list.length === 0) return `No suppliers found in parts database.`;
+    return `🏢 **Active parts suppliers:**\n` + list.map(function(s) { return `*   **${s}**`; }).join('\n');
+  }
+
+  // 27. Action: Add Part
+  if (matches('add part') || matches('create part') || matches('new part')) {
     const skuMatch = text.match(/sku[-:\s]+([a-z0-9-]+)/i) || text.match(/part[-:\s]+([a-z0-9-]+)/i) || [null, 'SKU-' + Math.floor(100 + Math.random() * 900)];
     const descMatch = text.match(/desc(?:ription)?[-:\s]+([^,.]+)/i) || [null, 'New Mechanical Part'];
     const stockMatch = text.match(/stock[-:\s]+(\d+)/i) || text.match(/qty[-:\s]+(\d+)/i) || [null, '15'];
@@ -299,12 +563,14 @@ window.simulateClaudeMockResponse = async function(messages) {
     \`\`\``;
   }
 
-  if (query.includes('update stock') || query.includes('change stock') || query.includes('adjust stock') || query.includes('set stock')) {
+  // 28. Action: Update Stock
+  if (matches('update stock') || matches('change stock') || matches('adjust stock') || matches('set stock')) {
     const stockMatch = text.match(/(?:to|at|is)\s+(\d+)/i) || text.match(/stock\s+(\d+)/i) || text.match(/(\d+)\s+items/i);
     const num = stockMatch ? parseInt(stockMatch[1]) : 20;
 
     let matchedPart = null;
-    for (const p of window.parts) {
+    for (var i = 0; i < window.parts.length; i++) {
+      var p = window.parts[i];
       if (query.includes(p.partNum.toLowerCase()) || query.includes(String(p.id).toLowerCase())) {
         matchedPart = p;
         break;
@@ -340,12 +606,13 @@ Please verify your SKU code. Here is a simulated stock adjustment for **${partNu
     }
   }
 
-  if (query.includes('how many') || query.includes('total parts') || query.includes('inventory status') || query.includes('count') || query.includes('statistics')) {
+  // 29. Action: Valuations
+  if (matches('how many') || matches('total parts') || matches('inventory status') || matches('count') || matches('statistics')) {
     const totalParts = window.parts.length;
-    const totalStock = window.parts.reduce((s, p) => s + p.stock, 0);
-    const lowStock = window.parts.filter(p => p.stock > 0 && p.stock <= (p.minStock || 1)).length;
-    const outOfStock = window.parts.filter(p => p.stock === 0).length;
-    const totalValue = window.parts.reduce((s, p) => s + (p.stock * (p.priceKsh || 0)), 0);
+    const totalStock = window.parts.reduce(function(s, p) { return s + p.stock; }, 0);
+    const lowStock = window.parts.filter(function(p) { return p.stock > 0 && p.stock <= (p.minStock || 1); }).length;
+    const outOfStock = window.parts.filter(function(p) { return p.stock === 0; }).length;
+    const totalValue = window.parts.reduce(function(s, p) { return s + (p.stock * (p.priceKsh || 0)); }, 0);
 
     return `Here is your dynamic **Printex Engineers** live inventory status:
 *   **Total Cataloged SKUs:** ${totalParts}
@@ -357,9 +624,10 @@ Please verify your SKU code. Here is a simulated stock adjustment for **${partNu
 Let me know if you would like me to navigate to the **Reports** page to view dynamic charts or help you adjust stock levels!`;
   }
 
-  if (query.includes('revenue') || query.includes('sales') || query.includes('total invoiced') || query.includes('average invoice')) {
-    const invInvoices = window.invoices.filter(i => i.type === 'invoice');
-    const totalRevenue = invInvoices.reduce((s, i) => s + i.grand, 0);
+  // 30. Action: Sales revenue
+  if (matches('revenue') || matches('sales') || matches('total invoiced') || matches('average invoice')) {
+    const invInvoices = window.invoices.filter(function(i) { return i.type === 'invoice'; });
+    const totalRevenue = invInvoices.reduce(function(s, i) { return s + i.grand; }, 0);
     const avgInvoice = invInvoices.length ? (totalRevenue / invInvoices.length) : 0;
     
     return `📊 **Printex Invoicing & Sales Analytics Summary:**
@@ -371,7 +639,8 @@ Let me know if you would like me to navigate to the **Reports** page to view dyn
 You can view complete breakdowns or trigger customer M-Pesa push payments inside the **Invoices** view!`;
   }
 
-  if (query.includes('mpesa') || query.includes('payment') || query.includes('paybill') || query.includes('bank') || query.includes('stk')) {
+  // 31. Action: Payment details
+  if (matches('mpesa') || matches('payment') || matches('paybill') || matches('bank') || matches('stk')) {
     return `💳 **Official Bank & Checkout Payment Channels:**
 *   **M-Pesa Business Paybill:** \`880100\`
 *   **M-Pesa Billing Account No:** \`051501\`
@@ -387,9 +656,9 @@ To initiate an dynamic STK Push payment, go to the **Invoices** view, click the 
     \`\`\``;
   }
 
-  return `🤖 Greetings! I am your **Printex Claude AI Assistant**. 
+  return `🤖 Greetings! I am your **Printex AI Assistant**. 
 
-I am currently running in **Simulated Offline Mode** (no Claude API key required). I have live access to your local database and can help you manage inventory, query sales statistics, update stocks, or navigate screens instantly in your browser!
+I am currently running in **Simulated Offline Mode** (no API key required). I have live access to your local database and can help you manage inventory, query sales statistics, update stocks, or navigate screens instantly in your browser!
 
 **Try typing some of these contextual instructions:**
 *   *"What is our current inventory status?"* (fetches live SQLite metrics)
@@ -979,6 +1248,37 @@ window.executeAIAction = async function(action) {
         window.showToast(`Stock updated: ${part.partNum} → ${newStock}`, 'success');
         break;
       }
+      case 'delete_part': {
+        const id = action.data.id;
+        if (!id) return;
+        await window.dbDelete('parts', id);
+        window.parts = window.parts.filter(p => p.id !== id);
+        window.renderInventory();
+        window.showToast('Part marked for deletion.', 'success');
+        window.logAIAction(`🗑️ Deleted part ID: ${id}`);
+        break;
+      }
+      case 'toggle_theme': {
+        if (typeof window.toggleTheme === 'function') {
+          window.toggleTheme();
+          window.logAIAction(`🎨 Toggled system theme`);
+        }
+        break;
+      }
+      case 'toggle_sidebar': {
+        if (typeof window.toggleSidebar === 'function') {
+          window.toggleSidebar();
+          window.logAIAction(`↔️ Toggled sidebar`);
+        }
+        break;
+      }
+      case 'export_backup': {
+        if (typeof window.exportBackup === 'function') {
+          window.exportBackup();
+          window.logAIAction(`💾 Exported data backup`);
+        }
+        break;
+      }
       case 'navigate_to': {
         const targetPage = action.data.page === 'new-invoice' ? 'createInvoice' : action.data.page;
         const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes(`'${targetPage}'`));
@@ -1004,7 +1304,7 @@ window.executeAIAction = async function(action) {
   }
 };
 
-window.appendAIMessage = function(role, text) {
+window.appendAIMessage = function(role, text, modelLabel) {
   const msgs = document.getElementById('aiMessages');
   if (!msgs) return;
 
@@ -1016,18 +1316,68 @@ window.appendAIMessage = function(role, text) {
 
   const avatar = document.createElement('div');
   avatar.className = `ai-avatar ${isUser ? 'user' : 'bot'}`;
-  avatar.innerHTML = isUser
-    ? (window.currentUser?.name?.[0]?.toUpperCase() || 'U')
-    : '🤖';
+  
+  if (isUser) {
+    avatar.style.background = 'var(--accent-glow)';
+    avatar.style.color = 'var(--accent)';
+    avatar.style.border = '1px solid rgba(0,212,255,0.2)';
+    avatar.style.fontSize = '12px';
+    avatar.style.fontWeight = '700';
+    avatar.innerHTML = (window.currentUser?.fullName?.[0]?.toUpperCase() || 'U');
+  } else {
+    // Custom generated AI assistant avatar image
+    avatar.style.background = 'transparent';
+    avatar.innerHTML = `<img src="/public/ai_avatar.png" style="width:30px;height:30px;border-radius:50%;object-fit:cover;border:1px solid var(--border2)" />`;
+  }
 
   const bubble = document.createElement('div');
   bubble.className = `ai-bubble ${isUser ? 'user' : isError ? 'error' : 'bot'}`;
-  bubble.innerHTML = window.formatAIText(text);
+
+  if (modelLabel && !isUser) {
+    const badge = document.createElement('div');
+    badge.style.cssText = 'font-size:9px;color:var(--dim);margin-bottom:4px;font-family:var(--font-mono);display:inline-block;border-bottom:1px solid var(--border);padding-bottom:2px;width:100%';
+    badge.innerHTML = `<i class="fa fa-robot"></i> ${modelLabel}`;
+    bubble.appendChild(badge);
+  }
 
   div.appendChild(avatar);
   div.appendChild(bubble);
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
+
+  if (role === 'bot' && !isError) {
+    // Typewriter streaming effect
+    let currentText = "";
+    let i = 0;
+    const speed = 6; // ms per tick
+    const charsPerTick = 4;
+    
+    // Create text wrapper inside bubble
+    const textNode = document.createElement('span');
+    bubble.appendChild(textNode);
+    const cursor = document.createElement('span');
+    cursor.style.cssText = 'color:var(--accent);font-weight:bold;animation:blink 0.8s infinite;margin-left:2px';
+    cursor.innerHTML = '|';
+    bubble.appendChild(cursor);
+    
+    const timer = setInterval(() => {
+      if (i >= text.length) {
+        clearInterval(timer);
+        textNode.innerHTML = window.formatAIText(text);
+        cursor.remove();
+        msgs.scrollTop = msgs.scrollHeight;
+      } else {
+        currentText += text.substring(i, i + charsPerTick);
+        i += charsPerTick;
+        textNode.innerHTML = window.formatAIText(currentText);
+        msgs.scrollTop = msgs.scrollHeight;
+      }
+    }, speed);
+  } else {
+    const textNode = document.createElement('span');
+    textNode.innerHTML = window.formatAIText(text);
+    bubble.appendChild(textNode);
+  }
 };
 
 window.appendActionButtons = function(buttons) {

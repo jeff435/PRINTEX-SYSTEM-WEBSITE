@@ -40,6 +40,19 @@ window.renderInventory = function(filtered) {
   const badge = document.getElementById('lowBadge');
   if (badge) badge.textContent = lowCount;
 
+  if (list.length === 0) {
+    body.innerHTML = `<tr>
+      <td colspan="11">
+        <div class="empty-state-container" style="padding: 40px; text-align: center;">
+          <img src="/public/empty_state.png" class="empty-state-img" alt="No parts found" style="max-width: 160px; height: auto; animation: float 5s ease-in-out infinite;" />
+          <h3 style="margin: 15px 0 5px; color: var(--accent); font-size: 1.25rem;">No Parts Found</h3>
+          <p style="color: var(--muted); font-size: 0.9rem; max-width: 400px; margin: 0 auto;">Try adjusting your filters, searching for something else, or creating a new part.</p>
+        </div>
+      </td>
+    </tr>`;
+    return;
+  }
+
   body.innerHTML = list.map(p => {
     const st = window.stockStatus(p);
     const pn = String(p.partNum || p.part_num || '—');
@@ -276,15 +289,69 @@ window.renderDashboard = function() {
     {label:'Out of Stock',value:outCount,sub:'Immediate action needed',color:'var(--danger)',icon:'fa-ban',kpiColor:'var(--danger)'},
     {label:'Active Services',value:activeServices.length,sub:'Industrial & engineering',color:'var(--gold)',icon:'fa-screwdriver-wrench',kpiColor:'var(--gold)',clickable:true}
   ];
+  // Smooth value animator helper
+  if (!window.animateValue) {
+    window.animateValue = function(obj, start, end, duration, isMonetary) {
+      let startTimestamp = null;
+      const step = (timestamp) => {
+        if (!startTimestamp) startTimestamp = timestamp;
+        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+        const currentVal = Math.floor(start + progress * (end - start));
+        if (isMonetary) {
+          obj.innerHTML = window.formatPrice ? window.formatPrice(currentVal) : 'Ksh ' + currentVal.toLocaleString();
+        } else {
+          obj.innerHTML = currentVal.toLocaleString();
+        }
+        if (progress < 1) {
+          window.requestAnimationFrame(step);
+        } else {
+          if (isMonetary) {
+            obj.innerHTML = window.formatPrice ? window.formatPrice(end) : 'Ksh ' + end.toLocaleString();
+          } else {
+            obj.innerHTML = end.toLocaleString();
+          }
+        }
+      };
+      window.requestAnimationFrame(step);
+    };
+  }
+
   const grid = document.getElementById('kpiGrid');
   if (grid) {
-    grid.innerHTML = kpis.map(k=>`
-      <div class="kpi-card" style="--kpi-color:${k.kpiColor}; ${k.clickable ? 'cursor:pointer' : ''}" ${k.clickable ? `onclick="window.showPage('services')"` : ''}>
+    grid.innerHTML = kpis.map((k, idx)=>`
+      <div class="kpi-card fade-in-up stagger-${idx+1}" style="--kpi-color:${k.kpiColor}; ${k.clickable ? 'cursor:pointer' : ''}" ${k.clickable ? `onclick="window.showPage('services')"` : ''}>
         <div class="kpi-label">${k.label}</div>
-        <div class="kpi-value" style="color:${k.color}">${k.value}</div>
+        <div class="kpi-value" id="kpi-val-${idx}" style="color:${k.color}">0</div>
         <div class="kpi-sub">${k.sub}</div>
         <i class="fa ${k.icon} kpi-icon" style="color:${k.color}"></i>
       </div>`).join('');
+
+    setTimeout(() => {
+      kpis.forEach((k, idx) => {
+        const el = document.getElementById(`kpi-val-${idx}`);
+        if (!el) return;
+        
+        let numericValue = 0;
+        let isMonetary = false;
+        
+        if (typeof k.value === 'number') {
+          numericValue = k.value;
+        } else if (typeof k.value === 'string') {
+          if (k.value.indexOf('Ksh') !== -1 || k.value.indexOf('$') !== -1) {
+            numericValue = parseFloat(k.value.replace(/[^0-9\.]/g, '')) || 0;
+            isMonetary = true;
+          } else {
+            numericValue = parseFloat(k.value) || 0;
+          }
+        }
+        
+        if (numericValue > 0) {
+          window.animateValue(el, 0, numericValue, 800, isMonetary);
+        } else {
+          el.innerHTML = k.value;
+        }
+      });
+    }, 50);
   }
 
   const cats = ['A','B','C','D','E','F','G','J','K','L'];

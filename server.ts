@@ -824,6 +824,13 @@ async function startServer() {
         : await query("SELECT * FROM submissions WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
 
       res.json({
+        uidValidity: {
+          parts: 20260608,
+          invoices: 20260608,
+          settings: 20260608,
+          activity: 20260608,
+          submissions: 20260608
+        },
         parts: partsResult.rows.map(r => ({
           id: r.id,
           category: r.category,

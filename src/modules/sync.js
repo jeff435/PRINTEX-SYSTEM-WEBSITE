@@ -31,6 +31,94 @@ window.updateSyncStatus = function(status) {
   }
 };
 
+window.getMailboxState = function(store) {
+  var defaults = {
+    parts: { name: 'INBOX.parts', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 },
+    invoices: { name: 'INBOX.invoices', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 },
+    settings: { name: 'INBOX.settings', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 },
+    activity: { name: 'INBOX.activity', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 },
+    submissions: { name: 'INBOX.submissions', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 }
+  };
+  var stored = localStorage.getItem('printex_mailbox_' + store);
+  if (stored) {
+    try { return JSON.parse(stored); } catch(e) {}
+  }
+  return defaults[store] || { name: 'INBOX.' + store, uidValidity: 20260608, highestModSeq: 0, lastSync: 0 };
+};
+
+window.saveMailboxState = function(store, state) {
+  localStorage.setItem('printex_mailbox_' + store, JSON.stringify(state));
+};
+
+window.toggleSyncPanel = function(e) {
+  if (e) e.stopPropagation();
+  var panel = document.getElementById('syncStatusPanel');
+  if (panel) {
+    panel.classList.toggle('active');
+  }
+};
+
+window.updateSyncPanelUI = async function() {
+  var lastSyncText = 'Never';
+  var lastSyncTime = 0;
+  var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions'];
+  var counts = {};
+  
+  for (var i = 0; i < stores.length; i++) {
+    var store = stores[i];
+    var state = window.getMailboxState(store);
+    if (state.lastSync > lastSyncTime) {
+      lastSyncTime = state.lastSync;
+    }
+    
+    if (typeof window.getMailboxStatus === 'function') {
+      counts[store] = await window.getMailboxStatus(store);
+    } else {
+      counts[store] = { total: 0, unseen: 0, flagged: 0, deleted: 0 };
+    }
+  }
+  
+  if (lastSyncTime > 0) {
+    lastSyncText = new Date(lastSyncTime).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  var panel = document.getElementById('syncStatusPanel');
+  if (panel) {
+    var html = `
+      <div class="sync-status-header">
+        <span>🔄 IMAP Sync Status</span>
+        <button class="btn btn-xs" onclick="window.toggleSyncPanel(event)" style="background:transparent;border:none;color:var(--muted);padding:0;cursor:pointer"><i class="fa fa-times"></i></button>
+      </div>
+      <div class="sync-status-list" style="margin-top:8px">
+    `;
+    
+    stores.forEach(function(store) {
+      var state = window.getMailboxState(store);
+      var count = counts[store];
+      html += `
+        <div class="sync-mailbox-row" style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px">
+          <span class="sync-mailbox-name" style="font-family:var(--font-mono);color:var(--muted)">${state.name}</span>
+          <span class="sync-mailbox-badge" style="background:var(--bg3);padding:2px 6px;border-radius:4px;font-weight:bold" title="Total / Unseen / Flagged / Deleted">
+            ${count.total} <span style="color:var(--dim)">|</span> 
+            <span style="color:${count.unseen > 0 ? 'var(--warn)' : 'var(--muted)'}">${count.unseen}</span> <span style="color:var(--dim)">|</span>
+            <span style="color:${count.flagged > 0 ? 'var(--gold)' : 'var(--muted)'}">${count.flagged}</span> <span style="color:var(--dim)">|</span>
+            <span style="color:${count.deleted > 0 ? 'var(--danger)' : 'var(--muted)'}">${count.deleted}</span>
+          </span>
+        </div>
+      `;
+    });
+    
+    html += `
+      </div>
+      <div class="sync-status-footer" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--dim)">
+        <span>Last: ${lastSyncText}</span>
+        <button class="btn btn-xs" onclick="window.triggerManualSync(); window.toggleSyncPanel(event);" style="padding:2px 8px;font-size:9px;background:var(--accent-glow);color:var(--accent);border:1px solid rgba(0,212,255,0.2);border-radius:4px;cursor:pointer">Sync Now</button>
+      </div>
+    `;
+    panel.innerHTML = html;
+  }
+};
+
 window.syncData = async function() {
   if (window.isSyncing) return;
   var token = localStorage.getItem('token');
@@ -40,23 +128,57 @@ window.syncData = async function() {
   window.updateSyncStatus('syncing');
 
   try {
-    var lastSyncTime = parseInt(localStorage.getItem('printex_last_sync') || '0');
+    var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions'];
     var currentSyncTime = Date.now();
 
+    // 1. EXPUNGE (deleted items sync & hard delete)
+    for (var s = 0; s < stores.length; s++) {
+      var store = stores[s];
+      var localData = await window.dbGet(store, undefined, true) || [];
+      var softDeleted = localData.filter(function(x) { return x._deleted; });
+      
+      for (var i = 0; i < softDeleted.length; i++) {
+        var record = softDeleted[i];
+        var recordId = store === 'settings' ? (record.key || record.id) : record.id;
+        try {
+          console.log('[Sync] Expunging deleted item: ' + store + '/' + recordId);
+          var delRes = await fetch('/api/sync/delete', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ store: store, id: recordId })
+          });
+          if (delRes.ok) {
+            await new Promise(function(resolve, reject) {
+              var tx = window.db.transaction(store, 'readwrite');
+              var req = tx.objectStore(store).delete(recordId);
+              req.onsuccess = function() { resolve(); };
+              req.onerror = function() { reject(req.error); };
+            });
+          }
+        } catch(e) {
+          console.warn('[Sync] Failed to expunge record on server:', e);
+        }
+      }
+    }
+
+    // 2. PUSH (unsynced items)
     var localParts = await window.dbGet('parts') || [];
-    var unsyncedParts = localParts.filter(function(p) { return !p._synced; });
+    var unsyncedParts = localParts.filter(function(p) { return !p._synced && !p._deleted; });
 
     var localInvoices = await window.dbGet('invoices') || [];
-    var unsyncedInvoices = localInvoices.filter(function(i) { return !i._synced; });
+    var unsyncedInvoices = localInvoices.filter(function(i) { return !i._synced && !i._deleted; });
 
     var localSubmissions = await window.dbGet('submissions') || [];
-    var unsyncedSubmissions = localSubmissions.filter(function(s) { return !s._synced; });
+    var unsyncedSubmissions = localSubmissions.filter(function(s) { return !s._synced && !s._deleted; });
 
     var localActivity = await window.dbGet('activity') || [];
-    var unsyncedActivity = localActivity.filter(function(a) { return !a._synced; });
+    var unsyncedActivity = localActivity.filter(function(a) { return !a._synced && !a._deleted; });
 
     var localSettings = await window.dbGet('settings') || [];
-    var unsyncedSettings = localSettings.filter(function(s) { return !s._synced; });
+    var unsyncedSettings = localSettings.filter(function(s) { return !s._synced && !s._deleted; });
 
     if (unsyncedParts.length || unsyncedInvoices.length || unsyncedSubmissions.length || unsyncedActivity.length || unsyncedSettings.length) {
       console.log('[Sync] Pushing unsynced items: parts=' + unsyncedParts.length + ', invoices=' + unsyncedInvoices.length + ', submissions=' + unsyncedSubmissions.length);
@@ -94,6 +216,16 @@ window.syncData = async function() {
       }
     }
 
+    // 3. PULL (Delta pull with UIDVALIDITY checks)
+    var lastSyncTime = Infinity;
+    stores.forEach(function(store) {
+      var state = window.getMailboxState(store);
+      if (state.lastSync < lastSyncTime) {
+        lastSyncTime = state.lastSync;
+      }
+    });
+    if (lastSyncTime === Infinity) lastSyncTime = 0;
+
     console.log('[Sync] Pulling updates since ' + lastSyncTime);
     var pullRes = await fetch('/api/sync/pull', {
       method: 'POST',
@@ -109,6 +241,28 @@ window.syncData = async function() {
     var serverData = await pullRes.json();
     var hasNewData = false;
 
+    // Check UIDVALIDITY mismatch
+    if (serverData.uidValidity) {
+      for (var s = 0; s < stores.length; s++) {
+        var store = stores[s];
+        var state = window.getMailboxState(store);
+        var serverValidity = serverData.uidValidity[store];
+        if (state.uidValidity !== serverValidity) {
+          console.warn('[Sync] Mailbox UIDVALIDITY mismatch for ' + store + ': local=' + state.uidValidity + ', server=' + serverValidity + '. Resetting!');
+          state.uidValidity = serverValidity;
+          state.lastSync = 0;
+          state.highestModSeq = 0;
+          window.saveMailboxState(store, state);
+          
+          if (store !== 'parts') {
+            var tx = window.db.transaction(store, 'readwrite');
+            tx.objectStore(store).clear();
+          }
+          hasNewData = true;
+        }
+      }
+    }
+
     if (serverData.parts && serverData.parts.length) {
       for (var i = 0; i < serverData.parts.length; i++) {
         var sp = serverData.parts[i];
@@ -116,6 +270,7 @@ window.syncData = async function() {
         sp.minStock = parseInt(sp.minStock) || 0;
         sp.priceKsh = parseFloat(sp.priceKsh || sp.price) || 0;
         sp._synced = true;
+        sp._deleted = sp._deleted || false;
         await window.dbPutNoSync('parts', sp);
         hasNewData = true;
       }
@@ -125,6 +280,7 @@ window.syncData = async function() {
       for (var i = 0; i < serverData.invoices.length; i++) {
         var sinv = serverData.invoices[i];
         sinv._synced = true;
+        sinv._deleted = sinv._deleted || false;
         if (typeof sinv.items === 'string') {
           try { sinv.items = JSON.parse(sinv.items); } catch(e) {}
         }
@@ -137,6 +293,7 @@ window.syncData = async function() {
       for (var i = 0; i < serverData.settings.length; i++) {
         var sset = serverData.settings[i];
         sset._synced = true;
+        sset._deleted = sset._deleted || false;
         if (typeof sset.value === 'string') {
           try { sset.value = JSON.parse(sset.value); } catch(e) {}
         }
@@ -149,6 +306,7 @@ window.syncData = async function() {
       for (var i = 0; i < serverData.activity.length; i++) {
         var sact = serverData.activity[i];
         sact._synced = true;
+        sact._deleted = sact._deleted || false;
         await window.dbPutNoSync('activity', sact);
         hasNewData = true;
       }
@@ -158,13 +316,21 @@ window.syncData = async function() {
       for (var i = 0; i < serverData.submissions.length; i++) {
         var ssub = serverData.submissions[i];
         ssub._synced = true;
+        ssub._deleted = ssub._deleted || false;
         await window.dbPutNoSync('submissions', ssub);
         hasNewData = true;
       }
     }
 
-    localStorage.setItem('printex_last_sync', String(currentSyncTime));
+    // Save sync state
+    stores.forEach(function(store) {
+      var state = window.getMailboxState(store);
+      state.lastSync = currentSyncTime;
+      window.saveMailboxState(store, state);
+    });
+
     window.updateSyncStatus('synced');
+    await window.updateSyncPanelUI();
 
     if (hasNewData) {
       window.parts = await window.dbGet('parts') || [];
@@ -203,7 +369,28 @@ window.triggerDelayedSync = function() {
   }, 1500);
 };
 
-// Deprecated periodic sync polling; real-time sync is handled via Firestore listeners.
+window.syncHeartbeatTimer = null;
+window.syncHeartbeatDelay = 15000;
+window.syncFailureCount = 0;
+
+window.startSyncHeartbeat = function() {
+  if (window.syncHeartbeatTimer) clearTimeout(window.syncHeartbeatTimer);
+  
+  window.syncHeartbeatTimer = setTimeout(async function runHeartbeat() {
+    try {
+      if (navigator.onLine && window.db) {
+        await window.syncData();
+        window.syncFailureCount = 0;
+        window.syncHeartbeatDelay = 15000;
+      }
+    } catch(e) {
+      window.syncFailureCount++;
+      window.syncHeartbeatDelay = Math.min(300000, window.syncHeartbeatDelay * 2);
+      console.warn(`[Sync Heartbeat] Sync failed. Retrying in ${window.syncHeartbeatDelay / 1000}s. Error:`, e);
+    }
+    window.syncHeartbeatTimer = setTimeout(runHeartbeat, window.syncHeartbeatDelay);
+  }, window.syncHeartbeatDelay);
+};
 
 window.triggerManualSync = async function() {
   if (!navigator.onLine) {
@@ -223,9 +410,8 @@ window.triggerManualSync = async function() {
   window.showToast('🔄 Synchronizing Google Cloud inventory...', 'info');
 
   try {
-    // Await full sync completion including any reseeding before updating status
     await window.initializeFirestoreListeners(user.uid);
-    
+    await window.syncData();
     window.updateSyncStatus('synced');
     window.showToast('☁️ Cloud synchronization complete across all devices!', 'success');
   } catch(e) {
@@ -243,7 +429,6 @@ window.initApp = async function() {
     console.error('[InitApp] IndexedDB failed to open:', e);
   }
 
-  // Load parts from local database cache (Firestore listeners in core.js handle all seeding decisions)
   try {
     const savedParts = await window.dbGet('parts') || [];
     if (savedParts.length > 0) window.parts = savedParts;
@@ -251,7 +436,6 @@ window.initApp = async function() {
     console.warn('[InitApp] Could not load parts:', e);
   }
 
-  // Load other data normally
   try {
     const savedInvoices = await window.dbGet('invoices') || [];
     const savedSubmissions = await window.dbGet('submissions') || [];
@@ -280,12 +464,10 @@ window.initApp = async function() {
     try { window.checkLogin(); } catch(e) {}
   }
 
-  // Render everything
   if (typeof window.renderDashboard === 'function') window.renderDashboard();
   if (typeof window.filterInventory === 'function') window.filterInventory();
   if (typeof window.updateBottomNavBadge === 'function') window.updateBottomNavBadge();
 
-  // Check and seed professional services catalog if empty
   if (typeof window.checkAndSeedServices === 'function') {
     try {
       await window.checkAndSeedServices();
@@ -293,6 +475,6 @@ window.initApp = async function() {
       console.error('[InitApp] Seeding professional services failed:', e);
     }
   }
+  window.startSyncHeartbeat();
+  window.updateSyncPanelUI();
 };
-
-
