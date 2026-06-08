@@ -517,22 +517,19 @@ window.initializeFirestoreListeners = async function(userId) {
   // ── VERSION-BASED FIRESTORE RESET FOR THIS USER ──
   const PARTS_VERSION = 'v4_august2025_308parts';
   const userVersionKey = 'printex_parts_version_' + userId;
-  const currentVersion = localStorage.getItem(userVersionKey);
 
   let needsReseed = false;
-  if (currentVersion !== PARTS_VERSION) {
-    try {
-      const partsSnap = await window.fDb.collection(`users/${userId}/parts`).doc('129').get();
-      if (!partsSnap.exists) {
-        console.log('[Firestore Sync] First default part (ID 129) is missing in Firestore for user ' + userId + '. Will seed default parts.');
-        needsReseed = true;
-      } else {
-        console.log('[Firestore Sync] Firestore has existing default parts data. Skipping reseed, updating version key.');
-        localStorage.setItem(userVersionKey, PARTS_VERSION);
-      }
-    } catch (e) {
-      console.warn("Could not check Firestore parts:", e);
+  try {
+    const partsSnap = await window.fDb.collection(`users/${userId}/parts`).doc('129').get();
+    if (!partsSnap.exists) {
+      console.log('[Firestore Sync] First default part (ID 129) is missing in Firestore for user ' + userId + '. Will seed default parts.');
+      needsReseed = true;
+    } else {
+      console.log('[Firestore Sync] Firestore has existing default parts data. Skipping reseed, updating version key.');
+      localStorage.setItem(userVersionKey, PARTS_VERSION);
     }
+  } catch (e) {
+    console.warn("Could not check Firestore parts:", e);
   }
 
   if (needsReseed && typeof window.DEFAULT_PARTS !== 'undefined') {
