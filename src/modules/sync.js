@@ -121,7 +121,17 @@ window.updateSyncPanelUI = async function() {
 
 window.syncData = async function() {
   if (window.isSyncing) return;
+
   var token = localStorage.getItem('token');
+  if (window.fAuth && window.fAuth.currentUser) {
+    try {
+      token = await window.fAuth.currentUser.getIdToken();
+      localStorage.setItem('token', token);
+    } catch (e) {
+      console.warn('[Sync] Failed to refresh Firebase token, using cached:', e);
+    }
+  }
+
   if (!token || !window.db) return;
 
   window.isSyncing = true;

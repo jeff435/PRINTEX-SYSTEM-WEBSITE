@@ -911,6 +911,17 @@ window.runMigration = async function(userId) {
 
 // ── AUTHENTICATION AND PERSISTENCE ───────────────────────────────
 if (window.fAuth) {
+  window.fAuth.getRedirectResult().then((result) => {
+    if (result && result.user) {
+      console.log("[Firebase Auth] Google redirect sign-in successful:", result.user.email);
+    }
+  }).catch((err) => {
+    console.error("[Firebase Auth] Google redirect sign-in failed:", err);
+    if (typeof window.showAuthError === 'function') {
+      window.showAuthError("Google Sign-In failed: " + err.message);
+    }
+  });
+
   window.fAuth.onAuthStateChanged(async (user) => {
     if (user) {
       console.log("[Firebase Auth] User logged in:", user.email);
@@ -925,6 +936,15 @@ if (window.fAuth) {
       
       // Save session
       window.saveSession(window.currentUser, true);
+
+      // Fetch Firebase ID Token and save to localStorage for Express REST Sync API
+      try {
+        const token = await user.getIdToken(true);
+        localStorage.setItem('token', token);
+        console.log("[Firebase Auth] Saved ID token to localStorage");
+      } catch (tokenErr) {
+        console.error("[Firebase Auth] Failed to get ID token:", tokenErr);
+      }
       
       // Initialize Firestore collections real-time listener
       window.initializeFirestoreListeners(user.uid);
@@ -1028,8 +1048,13 @@ window.doGoogleLogin = async function() {
   window.setBtnLoading('btnGoogleSignIn', true, '<i class="fa fa-spinner fa-spin"></i> Connecting...');
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
-    await window.fAuth.signInWithPopup(provider);
-    window.showAuthSuccess('Successfully logged in with Google!');
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (isMobile) {
+      await window.fAuth.signInWithRedirect(provider);
+    } else {
+      await window.fAuth.signInWithPopup(provider);
+      window.showAuthSuccess('Successfully logged in with Google!');
+    }
   } catch(err) {
     if (err.code === 'auth/unauthorized-domain') {
       const domain = window.location.hostname;
@@ -1384,8 +1409,26 @@ window.showPage = function(id, navEl) {
 };
 
 window.toggleSidebar = function() {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('sidebarOverlay').style.display = document.getElementById('sidebar').classList.contains('open') ? 'block' : 'none';
+  const sidebar = document.getElementById('sidebar');
+  const main = document.getElementById('main');
+  const overlay = document.getElementById('sidebarOverlay');
+  const isMobile = window.innerWidth <= 767;
+
+  if (isMobile) {
+    // Mobile: slide-in/out with overlay
+    sidebar.classList.toggle('open');
+    overlay.style.display = sidebar.classList.contains('open') ? 'block' : 'none';
+  } else {
+    // Desktop: collapse/expand sidebar
+    sidebar.classList.toggle('collapsed');
+    if (sidebar.classList.contains('collapsed')) {
+      main.classList.add('expanded');
+      main.style.marginLeft = '0';
+    } else {
+      main.classList.remove('expanded');
+      main.style.marginLeft = '230px';
+    }
+  }
 };
 
 window.closeSidebar = function() {
