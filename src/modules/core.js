@@ -517,18 +517,22 @@ window.initializeFirestoreListeners = async function(userId) {
   // ── VERSION-BASED FIRESTORE RESET FOR THIS USER ──
   const PARTS_VERSION = 'v4_august2025_308parts';
   const userVersionKey = 'printex_parts_version_' + userId;
+  const currentVersion = localStorage.getItem(userVersionKey);
 
   let needsReseed = false;
-  try {
-    const partsSnap = await window.fDb.collection(`users/${userId}/parts`).doc('129').get();
-    if (!partsSnap.exists) {
-      console.log('[Firestore Sync] First default part (ID 129) is missing in Firestore for user ' + userId + '. Will seed default parts.');
-      needsReseed = true;
-    } else {
-      localStorage.setItem(userVersionKey, PARTS_VERSION);
+  if (currentVersion !== PARTS_VERSION) {
+    try {
+      const partsSnap = await window.fDb.collection(`users/${userId}/parts`).doc('129').get();
+      if (!partsSnap.exists) {
+        console.log('[Firestore Sync] First default part (ID 129) is missing in Firestore for user ' + userId + '. Will seed default parts.');
+        needsReseed = true;
+      } else {
+        console.log('[Firestore Sync] Firestore has existing default parts data. Skipping reseed, updating version key.');
+        localStorage.setItem(userVersionKey, PARTS_VERSION);
+      }
+    } catch (e) {
+      console.warn("Could not check Firestore parts:", e);
     }
-  } catch (e) {
-    console.warn("Could not check Firestore parts:", e);
   }
 
   if (needsReseed && typeof window.DEFAULT_PARTS !== 'undefined') {
@@ -556,7 +560,11 @@ window.initializeFirestoreListeners = async function(userId) {
     }
 
     // SAFE MIGRATION: If Firestore empty but local IndexedDB has data, migrate local → cloud
-    if (firestoreData.length === 0 && window.db) {
+    const isParts = (store === 'parts');
+    const firestorePhysical = isParts ? firestoreData.filter(p => !p.isService) : firestoreData;
+    const isFirestoreEmpty = firestorePhysical.length === 0;
+
+    if (isFirestoreEmpty && window.db) {
       let localData = [];
       try {
         await new Promise((resolve) => {
@@ -569,9 +577,10 @@ window.initializeFirestoreListeners = async function(userId) {
 
       // Filter to non-deleted items for local data
       const activeLocal = localData.filter(x => !x._deleted);
+      const activeLocalPhysical = isParts ? activeLocal.filter(p => !p.isService) : activeLocal;
 
-      if (activeLocal.length > 0) {
-        console.log(`[Firebase] Firestore '${store}' empty – found ${activeLocal.length} local records. Migrating to cloud...`);
+      if (activeLocalPhysical.length > 0) {
+        console.log(`[Firebase] Firestore '${store}' has no physical items – found ${activeLocalPhysical.length} local records. Migrating to cloud...`);
         const migrationKey = `printex_migrated_${store}_${userId}`;
         if (!localStorage.getItem(migrationKey)) {
           try {
@@ -638,12 +647,14 @@ window.initializeFirestoreListeners = async function(userId) {
         return;
       }
       
-      // Firestore AND local IndexedDB are both empty
+      // Firestore AND local IndexedDB are both empty (or have no physical parts)
       if (store === 'parts') {
         // CRITICAL: Never leave parts empty — always fall back to DEFAULT_PARTS
         if (typeof window.DEFAULT_PARTS !== 'undefined' && window.DEFAULT_PARTS.length > 0) {
           console.log('[updateAndRender] Both Firestore and IndexedDB empty for parts. Loading DEFAULT_PARTS (' + window.DEFAULT_PARTS.length + ' items).');
-          window.parts = window.DEFAULT_PARTS.map(dp => ({ ...dp, id: String(dp.id) }));
+          const defParts = window.DEFAULT_PARTS.map(dp => ({ ...dp, id: String(dp.id) }));
+          const services = firestoreData.filter(p => p.isService);
+          window.parts = [...defParts, ...services];
           // Seed to IndexedDB + Firestore in background
           if (typeof window.seedDefaultParts === 'function') {
             window.seedDefaultParts().catch(e => console.error('[updateAndRender] Background seed failed:', e));
