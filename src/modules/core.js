@@ -520,9 +520,9 @@ window.initializeFirestoreListeners = async function(userId) {
 
   let needsReseed = false;
   try {
-    const partsSnap = await window.fDb.collection(`users/${userId}/parts`).doc('129').get();
-    if (!partsSnap.exists) {
-      console.log('[Firestore Sync] First default part (ID 129) is missing in Firestore for user ' + userId + '. Will seed default parts.');
+    const partsSnap = await window.fDb.collection(`users/${userId}/parts`).limit(310).get();
+    if (partsSnap.size < 300) {
+      console.log('[Firestore Sync] Firestore collection has incomplete parts data (' + partsSnap.size + '/308). Will seed default parts.');
       needsReseed = true;
     } else {
       console.log('[Firestore Sync] Firestore has existing default parts data. Skipping reseed, updating version key.');
@@ -703,16 +703,20 @@ window.initializeFirestoreListeners = async function(userId) {
           }
 
           // 1. Identify which local items to delete or keep
-          for (const localItem of localData) {
-            const localId = store === 'settings' ? String(localItem.key || localItem.id) : String(localItem.id);
-            
-            if (!firestoreMap.has(localId)) {
-              // Item exists locally but is not in Firestore snapshot
-              if (localItem._synced === true) {
-                // It was previously synced, meaning it has been deleted on the server. Remove it locally.
-                os.delete(localId);
+          // Safeguard: do not delete local parts if seeding is active, or if the server snapshot has fewer than 300 parts (incomplete snapshot)
+          const isSeedingOrIncomplete = (store === 'parts' && firestoreData.length > 0 && firestoreData.length < 300);
+          if (!window._isSeeding && !isSeedingOrIncomplete) {
+            for (const localItem of localData) {
+              const localId = store === 'settings' ? String(localItem.key || localItem.id) : String(localItem.id);
+              
+              if (!firestoreMap.has(localId)) {
+                // Item exists locally but is not in Firestore snapshot
+                if (localItem._synced === true) {
+                  // It was previously synced, meaning it has been deleted on the server. Remove it locally.
+                  os.delete(localId);
+                }
+                // If _synced is false, it's a newly added local item that hasn't synced yet. Keep it!
               }
-              // If _synced is false, it's a newly added local item that hasn't synced yet. Keep it!
             }
           }
 
@@ -1557,95 +1561,100 @@ window.clearAllData = async function() {
 window.seedDefaultParts = async function() {
   if (typeof window.DEFAULT_PARTS === 'undefined') return;
   
-  const user = window.fAuth ? window.fAuth.currentUser : null;
-  const userId = user ? user.uid : null;
-  
-  console.log('[seedDefaultParts] Starting seed of ' + window.DEFAULT_PARTS.length + ' default parts...');
-  
-  // 1. Clear IndexedDB parts store directly (safe, local-only, no race condition)
-  if (window.db) {
-    await new Promise((resolve, reject) => {
-      const tx = window.db.transaction('parts', 'readwrite');
-      const req = tx.objectStore('parts').clear();
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-    console.log('[seedDefaultParts] Cleared IndexedDB parts store.');
-  }
-  
-  // 2. Write ALL default parts to Firestore using set() (full overwrite per doc).
-  //    CRITICAL FIX: We skip clearing the Firestore collection first to eliminate
-  //    the race condition where batch deletes and batch writes overlap while
-  //    snapshot listeners are active, causing the UI to see an intermediate
-  //    incomplete collection (e.g. 282 instead of expected parts).
-  //    Since every default part has a fixed, unique ID, set() will create or
-  //    fully overwrite each document without needing to delete first.
-  if (userId && window.fDb) {
-    const BATCH_LIMIT = 400;
-    let totalWritten = 0;
-    for (let i = 0; i < window.DEFAULT_PARTS.length; i += BATCH_LIMIT) {
-      const chunk = window.DEFAULT_PARTS.slice(i, i + BATCH_LIMIT);
-      const writeBatch = window.fDb.batch();
-      for (const dp of chunk) {
-        const part = { ...dp, image: null, ownerId: userId, _synced: true, _lastUpdated: Date.now() };
-        part.id = String(part.id);
-        const docRef = window.fDb.collection(`users/${userId}/parts`).doc(part.id);
-        writeBatch.set(docRef, part);
-      }
-      try {
-        await writeBatch.commit();
-        totalWritten += chunk.length;
-        console.log('[seedDefaultParts] Firestore batch ' + (Math.floor(i / BATCH_LIMIT) + 1) + ' committed: ' + chunk.length + ' parts');
-      } catch(err) {
-        console.error('[seedDefaultParts] Firestore batch commit failed:', err);
-      }
+  window._isSeeding = true;
+  try {
+    const user = window.fAuth ? window.fAuth.currentUser : null;
+    const userId = user ? user.uid : null;
+    
+    console.log('[seedDefaultParts] Starting seed of ' + window.DEFAULT_PARTS.length + ' default parts...');
+    
+    // 1. Clear IndexedDB parts store directly (safe, local-only, no race condition)
+    if (window.db) {
+      await new Promise((resolve, reject) => {
+        const tx = window.db.transaction('parts', 'readwrite');
+        const req = tx.objectStore('parts').clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+      console.log('[seedDefaultParts] Cleared IndexedDB parts store.');
     }
-    console.log('[seedDefaultParts] Wrote ' + totalWritten + '/' + window.DEFAULT_PARTS.length + ' parts to Firestore');
-  }
-  
-  // 3. Write to IndexedDB in a single transaction
-  if (window.db) {
-    await new Promise((resolve, reject) => {
-      const tx = window.db.transaction('parts', 'readwrite');
-      const os = tx.objectStore('parts');
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      
-      for (const dp of window.DEFAULT_PARTS) {
-        const part = { ...dp, image: null };
-        if (userId) {
-          part.ownerId = userId;
-          part._synced = true;
-          part._lastUpdated = Date.now();
+    
+    // 2. Write ALL default parts to Firestore using set() (full overwrite per doc).
+    //    CRITICAL FIX: We skip clearing the Firestore collection first to eliminate
+    //    the race condition where batch deletes and batch writes overlap while
+    //    snapshot listeners are active, causing the UI to see an intermediate
+    //    incomplete collection (e.g. 282 instead of expected parts).
+    //    Since every default part has a fixed, unique ID, set() will create or
+    //    fully overwrite each document without needing to delete first.
+    if (userId && window.fDb) {
+      const BATCH_LIMIT = 400;
+      let totalWritten = 0;
+      for (let i = 0; i < window.DEFAULT_PARTS.length; i += BATCH_LIMIT) {
+        const chunk = window.DEFAULT_PARTS.slice(i, i + BATCH_LIMIT);
+        const writeBatch = window.fDb.batch();
+        for (const dp of chunk) {
+          const part = { ...dp, image: null, ownerId: userId, _synced: true, _lastUpdated: Date.now() };
+          part.id = String(part.id);
+          const docRef = window.fDb.collection(`users/${userId}/parts`).doc(part.id);
+          writeBatch.set(docRef, part);
         }
-        part.id = String(part.id);
-        os.put(part);
+        try {
+          await writeBatch.commit();
+          totalWritten += chunk.length;
+          console.log('[seedDefaultParts] Firestore batch ' + (Math.floor(i / BATCH_LIMIT) + 1) + ' committed: ' + chunk.length + ' parts');
+        } catch(err) {
+          console.error('[seedDefaultParts] Firestore batch commit failed:', err);
+        }
       }
-    });
-    console.log('[seedDefaultParts] Wrote ' + window.DEFAULT_PARTS.length + ' parts to IndexedDB');
-  }
-  
-  // 4. Update memory
-  window.parts = window.DEFAULT_PARTS.map(dp => {
-    const part = { ...dp, image: null };
-    if (userId) {
-      part.ownerId = userId;
-      part._synced = true;
-      part._lastUpdated = Date.now();
+      console.log('[seedDefaultParts] Wrote ' + totalWritten + '/' + window.DEFAULT_PARTS.length + ' parts to Firestore');
     }
-    part.id = String(part.id);
-    return part;
-  });
-  
-  // 5. Update local storage version keys
-  const PARTS_VERSION = 'v4_august2025_308parts';
-  localStorage.setItem('printex_parts_version_local', PARTS_VERSION);
-  if (userId) {
-    localStorage.setItem('printex_parts_version_' + userId, PARTS_VERSION);
+    
+    // 3. Write to IndexedDB in a single transaction
+    if (window.db) {
+      await new Promise((resolve, reject) => {
+        const tx = window.db.transaction('parts', 'readwrite');
+        const os = tx.objectStore('parts');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        
+        for (const dp of window.DEFAULT_PARTS) {
+          const part = { ...dp, image: null };
+          if (userId) {
+            part.ownerId = userId;
+            part._synced = true;
+            part._lastUpdated = Date.now();
+          }
+          part.id = String(part.id);
+          os.put(part);
+        }
+      });
+      console.log('[seedDefaultParts] Wrote ' + window.DEFAULT_PARTS.length + ' parts to IndexedDB');
+    }
+    
+    // 4. Update memory
+    window.parts = window.DEFAULT_PARTS.map(dp => {
+      const part = { ...dp, image: null };
+      if (userId) {
+        part.ownerId = userId;
+        part._synced = true;
+        part._lastUpdated = Date.now();
+      }
+      part.id = String(part.id);
+      return part;
+    });
+    
+    // 5. Update local storage version keys
+    const PARTS_VERSION = 'v4_august2025_308parts';
+    localStorage.setItem('printex_parts_version_local', PARTS_VERSION);
+    if (userId) {
+      localStorage.setItem('printex_parts_version_' + userId, PARTS_VERSION);
+    }
+    localStorage.setItem('printex_parts_version', PARTS_VERSION);
+    
+    console.log('[seedDefaultParts] ✅ Complete: ' + window.parts.length + ' parts seeded successfully.');
+  } finally {
+    window._isSeeding = false;
   }
-  localStorage.setItem('printex_parts_version', PARTS_VERSION);
-  
-  console.log('[seedDefaultParts] ✅ Complete: ' + window.parts.length + ' parts seeded successfully.');
 };
 
 // ── UTILITY HELPERS ───────────────────────────────────────────────
