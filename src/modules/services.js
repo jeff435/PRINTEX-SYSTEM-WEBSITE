@@ -4,26 +4,7 @@
 
 // Standard Seed Services related to industrial, machinery, engineering and printing press repair
 window.PROFESSIONAL_SERVICES = [
-  { id: 'srv_diag_001', partNum: 'SRV-DIAG-01', desc: 'Comprehensive System Diagnostics & Inspection', priceKsh: 5000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_hdbg_001', partNum: 'SRV-HDBG-01', desc: 'Heidelberg Printing Press General Servicing', priceKsh: 25000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_pneu_001', partNum: 'SRV-PNEU-01', desc: 'Pneumatic Cylinder Repair & Maintenance', priceKsh: 7500, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_hydr_001', partNum: 'SRV-HYDR-01', desc: 'Hydraulic System Repair & Hose Assembly', priceKsh: 12000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_calb_001', partNum: 'SRV-CALB-01', desc: 'Roller Calibration & Alignment', priceKsh: 6000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_motr_001', partNum: 'SRV-MOTR-01', desc: 'Industrial Motor Replacement & Rewinding', priceKsh: 15000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_conv_001', partNum: 'SRV-CONV-01', desc: 'Conveyor Belt Alignment and Splice Repair', priceKsh: 8500, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_sens_001', partNum: 'SRV-SENS-01', desc: 'Industrial Sensor Installation & Commissioning', priceKsh: 4500, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_elec_001', partNum: 'SRV-ELEC-01', desc: 'Electrical Troubleshooting & Wiring Repair', priceKsh: 9500, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_weld_001', partNum: 'SRV-WELD-01', desc: 'Precision Welding & Structure Fabrication', priceKsh: 10000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_pntg_001', partNum: 'SRV-PNTG-01', desc: 'Printing Press Maintenance & Calibration', priceKsh: 18000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_auto_001', partNum: 'SRV-AUTO-01', desc: 'Industrial PLC Automation & Programming Support', priceKsh: 35000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_cln_001',  partNum: 'SRV-CLN-01',  desc: 'Heavy Industrial Machinery Cleaning & Degreasing', priceKsh: 8000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_dlvr_001', partNum: 'SRV-DLVR-01', desc: 'Express Rider Delivery Service (Printex Network)', priceKsh: 1500, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_maint_001',partNum: 'SRV-MAINT-01',desc: 'Onsite Preventive Maintenance Program (Bi-Weekly)', priceKsh: 30000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_brkd_001', partNum: 'SRV-BRKD-01', desc: 'Emergency Breakdown Rapid Response Repair', priceKsh: 15000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_tech_001', partNum: 'SRV-TECH-01', desc: 'Technical Support & System Consultation', priceKsh: 5000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_part_001', partNum: 'SRV-PART-01', desc: 'Spare Part Precision Installation & Testing', priceKsh: 3500, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_insp_001', partNum: 'SRV-INSP-01', desc: 'Annual Industrial Plant Safety Inspection', priceKsh: 45000, category: 'Services', isService: true, stock: Infinity },
-  { id: 'srv_logi_001', partNum: 'SRV-LOGI-01', desc: 'Heidelberg Parts Logistics & Transport', priceKsh: 5000, category: 'Services', isService: true, stock: Infinity }
+  { id: 'srv_custom_001', partNum: 'SRV-CUSTOM-01', desc: 'Custom Engineering / Press Repair Service', priceKsh: 0, category: 'Services', isService: true, stock: Infinity }
 ];
 
 // Injects premium Services page styles dynamically
@@ -164,11 +145,25 @@ window.checkAndSeedServices = async function() {
   
   if (!window.parts) window.parts = [];
 
+  // Cleanup: remove old pre-seeded services (ids starting with 'srv_' but not 'srv_custom_001')
+  const toDelete = window.parts.filter(p => p.isService === true && String(p.id).startsWith('srv_') && String(p.id) !== 'srv_custom_001');
+  if (toDelete.length > 0) {
+    console.log(`[Services] Cleaning up ${toDelete.length} legacy services...`);
+    for (const s of toDelete) {
+      window.parts = window.parts.filter(p => String(p.id) !== String(s.id));
+      try {
+        await window.dbDelete('parts', String(s.id));
+      } catch (e) {
+        console.error(`[Services] Failed to delete legacy service ${s.id}:`, e);
+      }
+    }
+  }
+
   const existingServicesCount = window.parts.filter(p => p.isService === true).length;
   console.log(`[Services] Currently found ${existingServicesCount} services in local parts array.`);
 
   if (existingServicesCount === 0) {
-    console.log("[Services] No services found. Auto-seeding 20+ professional services...");
+    console.log("[Services] No services found. Auto-seeding custom engineering service...");
     
     let seedCount = 0;
     for (const service of window.PROFESSIONAL_SERVICES) {

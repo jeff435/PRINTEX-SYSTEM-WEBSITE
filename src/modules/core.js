@@ -512,13 +512,12 @@ window.initializeFirestoreListeners = async function(userId) {
   let needsReseed = false;
   if (currentVersion !== PARTS_VERSION) {
     try {
-      const partsSnap = await window.fDb.collection(`users/${userId}/parts`).limit(1).get();
-      if (partsSnap.empty) {
-        console.log('[Firestore Sync] Firestore parts collection is empty for user ' + userId + '. Will seed default parts.');
+      const partsSnap = await window.fDb.collection(`users/${userId}/parts`).doc('129').get();
+      if (!partsSnap.exists) {
+        console.log('[Firestore Sync] First default part (ID 129) is missing in Firestore for user ' + userId + '. Will seed default parts.');
         needsReseed = true;
       } else {
-        // Collection has existing data — do NOT reseed, just update version key
-        console.log('[Firestore Sync] Firestore has existing parts data. Skipping reseed, updating version key.');
+        console.log('[Firestore Sync] Firestore has existing default parts data. Skipping reseed, updating version key.');
         localStorage.setItem(userVersionKey, PARTS_VERSION);
       }
     } catch (e) {
@@ -625,9 +624,8 @@ window.initializeFirestoreListeners = async function(userId) {
             req.onsuccess = () => { localPartsCount = req.result; resolve(); };
             req.onerror = () => resolve();
           });
-          const expectedPartsCount = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 308;
-          if (localPartsCount < expectedPartsCount && typeof window.seedDefaultParts === 'function') {
-            console.log('[updateAndRender] Parts count too low and cloud empty. Reseeding...');
+          if (localPartsCount === 0 && typeof window.seedDefaultParts === 'function') {
+            console.log('[updateAndRender] Parts count is 0. Reseeding defaults...');
             await window.seedDefaultParts();
           }
         } catch(e) {}
@@ -644,8 +642,7 @@ window.initializeFirestoreListeners = async function(userId) {
             req.onerror = () => resolve();
           });
         } catch(e) {}
-        const expectedPartsCount = window.DEFAULT_PARTS ? window.DEFAULT_PARTS.length : 308;
-        if (localDataParts.length >= expectedPartsCount) {
+        if (localDataParts.length > 0) {
           window.parts = localDataParts;
         } else {
           window.parts = window.DEFAULT_PARTS || [];
