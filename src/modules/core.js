@@ -498,6 +498,16 @@ let firestoreListeners = [];
 window.initializeFirestoreListeners = async function(userId) {
   if (!window.fDb) return;
   
+  // Wait until DEFAULT_PARTS is loaded to avoid race conditions with seeding
+  if (typeof window.DEFAULT_PARTS === 'undefined') {
+    console.log('[Firestore Sync] window.DEFAULT_PARTS is not ready yet. Retrying listener initialization in 100ms...');
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(window.initializeFirestoreListeners(userId));
+      }, 100);
+    });
+  }
+  
   // Clear any existing active listeners to avoid duplicates
   firestoreListeners.forEach(unsub => unsub());
   firestoreListeners = [];
