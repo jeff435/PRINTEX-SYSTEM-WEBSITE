@@ -259,9 +259,11 @@ async function startServer() {
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
       const id = "usr_" + Math.random().toString(36).substring(2, 15);
-      await query("INSERT INTO users (id, fullName, email, password) VALUES ($1, $2, $3, $4)", [id, fullName, email.toLowerCase(), hashedPassword]);
+      const emailLower = email.toLowerCase();
+      const role = (emailLower === 'admin@printex.com' || emailLower === 'printexengineers@gmail.com') ? 'admin' : 'user';
+      await query("INSERT INTO users (id, fullName, email, password, role) VALUES ($1, $2, $3, $4, $5)", [id, fullName, emailLower, hashedPassword, role]);
       const token = jwt.sign({ id, email, fullName }, JWT_SECRET, { expiresIn: "7d" });
-      res.json({ success: true, token, user: { id, email, fullName, role: "user" } });
+      res.json({ success: true, token, user: { id, email, fullName, role } });
     } catch (error: any) {
       console.error("Signup error:", error);
       if (error.code === "23505" || error.message?.includes("UNIQUE constraint failed")) {
@@ -344,13 +346,20 @@ async function startServer() {
             if (userRes.rows.length > 0) {
               localUserId = userRes.rows[0].id;
               role = userRes.rows[0].role || 'user';
+              if ((emailLower === 'admin@printex.com' || emailLower === 'printexengineers@gmail.com') && role !== 'admin') {
+                role = 'admin';
+                await query("UPDATE users SET role = 'admin' WHERE id = $1", [localUserId]);
+                console.log(`[Auth] Upgraded local user ${emailLower} to admin`);
+              }
             } else {
               const name = decoded.name || emailLower.split('@')[0];
+              const initialRole = (emailLower === 'admin@printex.com' || emailLower === 'printexengineers@gmail.com') ? 'admin' : 'user';
               await query(
                 "INSERT INTO users (id, fullName, email, password, role) VALUES ($1, $2, $3, $4, $5) ON CONFLICT(id) DO NOTHING",
-                [decoded.uid, name, emailLower, bcrypt.hashSync(Math.random().toString(36), 10), 'user']
+                [decoded.uid, name, emailLower, bcrypt.hashSync(Math.random().toString(36), 10), initialRole]
               );
-              console.log(`[Auth] Auto-registered Firebase user ${emailLower} in local DB`);
+              console.log(`[Auth] Auto-registered Firebase user ${emailLower} as ${initialRole} in local DB`);
+              role = initialRole;
             }
           } catch (dbErr) {
             console.warn("[Auth] Could not look up local user, using Firebase UID:", dbErr);

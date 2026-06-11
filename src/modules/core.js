@@ -1094,14 +1094,14 @@ window.doLogin = async function() {
   if (!email || !pass) return window.showAuthError('Please enter email and password');
   window.setBtnLoading('btnSignIn', true, '<i class="fa fa-spinner fa-spin"></i> Signing in...');
   try {
-    const serverEmail = email.includes('@') ? email : (email === 'admin' ? 'admin@printex.com' : email);
+    const serverEmail = email.includes('@') ? email : (email === 'admin' ? 'printexengineers@gmail.com' : email);
     const passToUse = (email === 'admin' && pass === 'admin123') ? 'admin123' : pass;
     
     if (window.fAuth) {
       await window.fAuth.signInWithEmailAndPassword(serverEmail, passToUse).catch(async (authErr) => {
-        if (authErr.code === 'auth/user-not-found' && serverEmail === 'admin@printex.com') {
+        if (authErr.code === 'auth/user-not-found' && serverEmail === 'printexengineers@gmail.com') {
           console.log("[Firebase Auth] Creating default admin account in Firebase...");
-          await window.fAuth.createUserWithEmailAndPassword('admin@printex.com', 'admin123');
+          await window.fAuth.createUserWithEmailAndPassword('printexengineers@gmail.com', 'admin123');
           if (window.fAuth.currentUser) {
             await window.fAuth.currentUser.updateProfile({ displayName: 'Admin User' });
           }
