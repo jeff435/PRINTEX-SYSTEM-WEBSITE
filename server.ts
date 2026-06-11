@@ -21,33 +21,54 @@ const pool = process.env.DATABASE_URL ? new Pool({
   connectionString: process.env.DATABASE_URL,
 }) : null;
 
-// Initialize Firebase Admin lazily
+// ─── Firebase Admin Initialization ───────────────────────────────
+const FIREBASE_DB_ID = firebaseConfig.firestoreDatabaseId;
+let adminInitError: string | null = null;
 let adminApp: admin.app.App | null = null;
-function getAdminApp() {
-  if (!adminApp) {
+
+function initFirebaseAdmin(): admin.app.App | null {
+  if (admin.apps.length > 0) return admin.apps[0]!;
+
+  const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (serviceAccountEnv) {
     try {
-      adminApp = admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
-        projectId: firebaseConfig.projectId,
+      const serviceAccount = JSON.parse(serviceAccountEnv);
+      const app = admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
       });
-    } catch (e) {
-      console.warn("[Firebase Admin] Failed to initialize with applicationDefault credentials. Using fallback projectId-only config.", e);
-      try {
-        adminApp = admin.initializeApp({
-          projectId: firebaseConfig.projectId,
-        });
-      } catch (err) {
-        console.error("[Firebase Admin] Failed to initialize fallback config:", err);
-      }
+      console.log("[Firebase Admin] Initialized from FIREBASE_SERVICE_ACCOUNT env var for project:", serviceAccount.project_id);
+      return app;
+    } catch (parseErr: any) {
+      adminInitError = "FIREBASE_SERVICE_ACCOUNT could not be parsed as JSON: " + parseErr.message;
+      console.error("[Firebase Admin]", adminInitError);
     }
   }
-  return adminApp!;
+
+  // Fall back to applicationDefault (works with GOOGLE_APPLICATION_CREDENTIALS or local gcloud)
+  try {
+    const app = admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+      projectId: firebaseConfig.projectId,
+    });
+    console.log("[Firebase Admin] Initialized via applicationDefault credentials.");
+    return app;
+  } catch (e: any) {
+    adminInitError =
+      "Firebase Admin could not initialize. Set FIREBASE_SERVICE_ACCOUNT env var with your service account JSON. Error: " + e.message;
+    console.error("[Firebase Admin] CRITICAL:", adminInitError);
+    return null;
+  }
 }
-const db = () => getFirestore(firebaseConfig.firestoreDatabaseId);
+
+adminApp = initFirebaseAdmin();
+
+const db = () => {
+  if (!adminApp) throw new Error("Firebase Admin SDK not initialized. " + adminInitError);
+  return getFirestore(adminApp, FIREBASE_DB_ID);
+};
 const auth = () => {
-  const app = getAdminApp();
-  if (!app) throw new Error("Firebase Admin SDK not initialized");
-  return app.auth();
+  if (!adminApp) throw new Error("Firebase Admin SDK not initialized. " + adminInitError);
+  return adminApp.auth();
 };
 
 // Unified database query helper
@@ -188,7 +209,37 @@ async function startServer() {
 
   // Health Check
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", database: pool ? "postgres" : "sqlite", environment: process.env.NODE_ENV || "development" });
+    res.json({
+      status: "ok",
+      database: pool ? "postgres" : "sqlite",
+      firebaseAdmin: adminApp ? "initialized" : "not_initialized",
+      firebaseAdminError: adminInitError,
+      environment: process.env.NODE_ENV || "development",
+    });
+  });
+
+  // Sync Status — diagnostic endpoint (no auth required)
+  app.get("/api/sync/status", async (req, res) => {
+    let firebaseStatus = "not_initialized";
+    let firebaseError = adminInitError;
+    if (adminApp) {
+      try {
+        await auth().listUsers(1);
+        firebaseStatus = "OK";
+        firebaseError = null;
+      } catch (e: any) {
+        firebaseStatus = "credentials_error";
+        firebaseError = e.message;
+      }
+    }
+    res.json({
+      firebaseAdmin: firebaseStatus,
+      firebaseAdminError: firebaseError,
+      database: pool ? "postgres" : "sqlite",
+      firestoreDbId: FIREBASE_DB_ID,
+      hasServiceAccount: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+      timestamp: new Date().toISOString(),
+    });
   });
 
 
@@ -253,66 +304,108 @@ async function startServer() {
   });
 
   // --- Auth Middleware ---
+  // Accepts Firebase ID tokens primarily. Falls back to local JWT only for non-sync routes.
   const authenticate = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: "Unauthorized" });
+
+    if (!authHeader) {
+      console.warn(`[Auth] Missing Authorization header on ${req.method} ${req.url}`);
+      return res.status(401).json({
+        error: "Unauthorized",
+        reason: "No Authorization header provided. Send: Authorization: Bearer <firebase-id-token>",
+      });
     }
+    if (!authHeader.startsWith('Bearer ')) {
+      console.warn(`[Auth] Authorization header does not use Bearer scheme on ${req.url}`);
+      return res.status(401).json({
+        error: "Unauthorized",
+        reason: "Authorization header must use Bearer scheme.",
+      });
+    }
+
     const token = authHeader.split(" ")[1];
-    
-    // Check if it's a Firebase token or a fallback JWT
+    if (!token || token.length < 20) {
+      return res.status(401).json({ error: "Unauthorized", reason: "Bearer token is empty or malformed." });
+    }
+
+    // Primary: verify Firebase ID token
+    if (adminApp) {
+      try {
+        const decoded = await auth().verifyIdToken(token, true);
+        console.log(`[Auth] Firebase token verified for uid=${decoded.uid} email=${decoded.email}`);
+
+        const emailLower = (decoded.email || "").toLowerCase();
+        let localUserId = decoded.uid;
+        let role = 'user';
+
+        if (emailLower) {
+          try {
+            const userRes = await query("SELECT id, role FROM users WHERE LOWER(email) = $1", [emailLower]);
+            if (userRes.rows.length > 0) {
+              localUserId = userRes.rows[0].id;
+              role = userRes.rows[0].role || 'user';
+            } else {
+              const name = decoded.name || emailLower.split('@')[0];
+              await query(
+                "INSERT INTO users (id, fullName, email, password, role) VALUES ($1, $2, $3, $4, $5) ON CONFLICT(id) DO NOTHING",
+                [decoded.uid, name, emailLower, bcrypt.hashSync(Math.random().toString(36), 10), 'user']
+              );
+              console.log(`[Auth] Auto-registered Firebase user ${emailLower} in local DB`);
+            }
+          } catch (dbErr) {
+            console.warn("[Auth] Could not look up local user, using Firebase UID:", dbErr);
+          }
+        }
+
+        (req as any).user = { id: localUserId, uid: decoded.uid, email: decoded.email, fullName: decoded.name || "", role };
+        return next();
+      } catch (firebaseErr: any) {
+        const code: string = firebaseErr.code || "";
+        console.warn(`[Auth] Firebase token verification failed on ${req.url}:`, code, firebaseErr.message);
+
+        if (code === 'auth/id-token-expired') {
+          return res.status(401).json({
+            error: "Unauthorized",
+            reason: "Firebase ID token has expired. Client must call getIdToken(true) to refresh.",
+            code: "TOKEN_EXPIRED",
+          });
+        }
+        if (code === 'auth/id-token-revoked') {
+          return res.status(401).json({
+            error: "Unauthorized",
+            reason: "Firebase ID token has been revoked. Please sign in again.",
+            code: "TOKEN_REVOKED",
+          });
+        }
+        // For sync routes, do NOT fall back to local JWT
+        if (req.url.startsWith('/api/sync')) {
+          return res.status(401).json({
+            error: "Unauthorized",
+            reason: "Sync routes require a valid Firebase ID token. Error: " + firebaseErr.message,
+            code: "INVALID_TOKEN",
+          });
+        }
+      }
+    } else {
+      console.error(`[Auth] Firebase Admin not initialized (${adminInitError}). Sync routes will be unavailable.`);
+      if (req.url.startsWith('/api/sync')) {
+        return res.status(401).json({
+          error: "Unauthorized",
+          reason: "Firebase Admin SDK is not initialized on the server. Set FIREBASE_SERVICE_ACCOUNT env var.",
+          code: "ADMIN_NOT_INITIALIZED",
+        });
+      }
+    }
+
+    // Fallback: local JWT (only for non-sync routes)
     try {
-      // First try Firebase via Admin SDK
-      let decoded: any;
-      try {
-        decoded = await auth().verifyIdToken(token);
-      } catch (authErr) {
-        console.warn("[Auth] Firebase Admin SDK token verification failed. Trying fallback manual decode...", authErr);
-        // Fallback: decode Firebase token manually (trusting payload in development/fallback mode)
-        const parsed = jwt.decode(token) as any;
-        if (parsed && parsed.uid && parsed.email) {
-          decoded = {
-            uid: parsed.uid,
-            email: parsed.email,
-            name: parsed.name || parsed.email.split('@')[0],
-          };
-        } else {
-          throw authErr;
-        }
-      }
-
-      // Look up local user by email to unify user ID
-      const emailLower = decoded.email ? decoded.email.toLowerCase() : "";
-      let localUserId = decoded.uid;
-      let role = 'user';
-      
-      if (emailLower) {
-        const userRes = await query("SELECT id, role FROM users WHERE LOWER(email) = $1", [emailLower]);
-        if (userRes.rows.length > 0) {
-          localUserId = userRes.rows[0].id;
-          role = userRes.rows[0].role || 'user';
-        } else {
-          // Auto-register Firebase user in local database
-          const name = decoded.name || emailLower.split('@')[0];
-          await query(
-            "INSERT INTO users (id, fullName, email, password, role) VALUES ($1, $2, $3, $4, $5)",
-            [decoded.uid, name, emailLower, bcrypt.hashSync(Math.random().toString(36), 10), 'user']
-          );
-        }
-      }
-
-      (req as any).user = { id: localUserId, email: decoded.email, fullName: decoded.name || (decoded as any).full_name, role: role };
-      next();
-    } catch (e) {
-      // Try local JWT fallback
-      try {
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
-        (req as any).user = decoded;
-        next();
-      } catch (jwtErr) {
-        console.error("Auth error (both Firebase and JWT failed):", e);
-        return res.status(401).json({ error: "Unauthorized" });
-      }
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      console.log(`[Auth] Accepted local JWT for uid=${decoded.id} on ${req.url}`);
+      (req as any).user = decoded;
+      return next();
+    } catch (jwtErr) {
+      console.error("[Auth] All auth methods failed:", (jwtErr as any).message);
+      return res.status(401).json({ error: "Unauthorized", reason: "Token is not a valid Firebase ID token or local JWT." });
     }
   };
 
@@ -321,23 +414,18 @@ async function startServer() {
     const debugInfo: any = {
       firebase: "unknown",
       postgres: "unknown",
-      env: {
-        HAS_DATABASE_URL: !!process.env.DATABASE_URL,
-        NODE_ENV: process.env.NODE_ENV
-      }
+      firebaseAdminInitError: adminInitError,
+      hasServiceAccount: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+      env: { HAS_DATABASE_URL: !!process.env.DATABASE_URL, NODE_ENV: process.env.NODE_ENV }
     };
-
     try {
-      // Check if admin is initialized
       const firebaseAuth = auth();
       debugInfo.firebase = "Initialized";
-      // Try to list a user to see if credentials work
       await firebaseAuth.listUsers(1);
       debugInfo.firebase = "OK";
     } catch (e: any) {
       debugInfo.firebase = "ERROR: " + e.message;
     }
-
     if (process.env.DATABASE_URL) {
       try {
         const { default: pkg } = await import("pg");
@@ -346,13 +434,12 @@ async function startServer() {
         const result = await pool.query("SELECT 1");
         debugInfo.postgres = "OK";
         const tables = await pool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
-        debugInfo.tables = tables.rows.map(r => r.table_name);
+        debugInfo.tables = tables.rows.map((r: any) => r.table_name);
         await pool.end();
       } catch (e: any) {
         debugInfo.postgres = "ERROR: " + e.message;
       }
     }
-
     res.json(debugInfo);
   });
 

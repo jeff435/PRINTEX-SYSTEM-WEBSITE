@@ -913,6 +913,56 @@ window.hideSpinner = function() {
   if (el) el.classList.add('hidden');
 };
 
+// ── SHARED AUTH TOKEN HELPER ─────────────────────────────────
+// Central helper used by ALL sync calls. Always returns a fresh Firebase ID token.
+// Caches for up to 55 minutes to avoid redundant network calls.
+window._cachedToken = null;
+window._cachedTokenExpiry = 0;
+
+window.getAuthToken = async function(force = false) {
+  const user = window.fAuth ? window.fAuth.currentUser : null;
+  if (!user) {
+    throw new Error('[Auth] No Firebase user is currently signed in. Cannot get auth token.');
+  }
+  const now = Date.now();
+  // Serve cached token if it has more than 2 minutes of remaining life
+  if (!force && window._cachedToken && now < window._cachedTokenExpiry - 120000) {
+    return window._cachedToken;
+  }
+  try {
+    const token = await user.getIdToken(true); // force refresh from Firebase
+    window._cachedToken = token;
+    window._cachedTokenExpiry = now + 55 * 60 * 1000; // 55 minutes
+    localStorage.setItem('token', token);
+    console.log('[Auth] Firebase ID token refreshed and cached.');
+    return token;
+  } catch (err) {
+    console.error('[Auth] getIdToken(true) failed:', err);
+    // If force-refresh fails but we have a cached token, use it as last resort
+    if (window._cachedToken) {
+      console.warn('[Auth] Using cached token as fallback after refresh failure.');
+      return window._cachedToken;
+    }
+    throw err;
+  }
+};
+
+// Proactive token refresh — runs every 55 min so the token never expires mid-session
+window._tokenRefreshTimer = null;
+window.startTokenRefreshTimer = function() {
+  if (window._tokenRefreshTimer) clearInterval(window._tokenRefreshTimer);
+  window._tokenRefreshTimer = setInterval(async () => {
+    if (window.fAuth && window.fAuth.currentUser) {
+      try {
+        await window.getAuthToken();
+        console.log('[Auth] Proactive token refresh succeeded.');
+      } catch (e) {
+        console.warn('[Auth] Proactive token refresh failed:', e);
+      }
+    }
+  }, 55 * 60 * 1000); // every 55 minutes
+};
+
 // Migration runner placeholder (will be defined in migration.js)
 window.runMigration = async function(userId) {
   // If already migrated, skip
@@ -960,14 +1010,19 @@ if (window.fAuth) {
       // Save session
       window.saveSession(window.currentUser, true);
 
-      // Fetch Firebase ID Token and save to localStorage for Express REST Sync API
+      // Fetch Firebase ID Token — force refresh on login
       try {
         const token = await user.getIdToken(true);
+        window._cachedToken = token;
+        window._cachedTokenExpiry = Date.now() + 55 * 60 * 1000;
         localStorage.setItem('token', token);
-        console.log("[Firebase Auth] Saved ID token to localStorage");
+        console.log("[Firebase Auth] ID token obtained and cached on login.");
       } catch (tokenErr) {
         console.error("[Firebase Auth] Failed to get ID token:", tokenErr);
       }
+
+      // Start proactive token refresh timer (refreshes every 55 min)
+      window.startTokenRefreshTimer();
       
       // Initialize Firestore collections real-time listener
       window.initializeFirestoreListeners(user.uid);
