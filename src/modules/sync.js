@@ -5,6 +5,92 @@
 
 window.isSyncing = false;
 
+// Helper to perform fetch requests authenticated by Firebase ID tokens, with a single-retry on 401.
+async function authenticatedFetch(url, options = {}) {
+  let token;
+  try {
+    if (typeof window.getAuthToken === 'function') {
+      token = await window.getAuthToken();
+    } else {
+      token = localStorage.getItem('token');
+    }
+  } catch (err) {
+    console.error('[Sync] Cannot fetch, failed to get token:', err);
+    throw err;
+  }
+
+  const makeHeaders = (tok) => {
+    return Object.assign({}, options.headers || {}, {
+      'Content-Type': 'application/json',
+      'Authorization': tok ? 'Bearer ' + tok : ''
+    });
+  };
+
+  const reqOptions = Object.assign({}, options, {
+    headers: makeHeaders(token)
+  });
+
+  let res = await fetch(url, reqOptions);
+
+  if (res.status === 401) {
+    console.warn(`[Sync] Request to ${url} returned 401. Retrying with force-refreshed token...`);
+    try {
+      if (typeof window.getAuthToken === 'function') {
+        token = await window.getAuthToken(true); // Force refresh
+      } else if (window.fAuth && window.fAuth.currentUser) {
+        token = await window.fAuth.currentUser.getIdToken(true);
+        localStorage.setItem('token', token);
+      }
+      const retryOptions = Object.assign({}, options, {
+        headers: makeHeaders(token)
+      });
+      res = await fetch(url, retryOptions);
+    } catch (retryErr) {
+      console.error('[Sync] Retry fetch failed after token refresh:', retryErr);
+      throw retryErr;
+    }
+  }
+
+  return res;
+}
+
+// Helper for Last-Write-Wins conflict resolution between local IndexedDB and incoming server data
+async function resolveConflictAndSave(store, serverItem) {
+  var id = store === 'settings' ? (serverItem.key || serverItem.id) : serverItem.id;
+  if (!id) return false;
+
+  var localItem;
+  try {
+    localItem = await window.dbGet(store, id, true);
+  } catch (e) {
+    console.warn(`[Sync] Failed to fetch local item ${store}/${id}:`, e);
+  }
+
+  if (!localItem) {
+    await window.dbPutNoSync(store, serverItem);
+    return true;
+  }
+
+  // If local item is marked as synced, we overwrite it safely
+  if (localItem._synced) {
+    await window.dbPutNoSync(store, serverItem);
+    return true;
+  }
+
+  // If local item is unsynced, compare timestamps (Last-Write-Wins)
+  var serverTime = parseInt(serverItem.updated_at || serverItem.updatedAt) || 0;
+  var localTime = parseInt(localItem.updated_at || localItem.updatedAt) || 0;
+
+  if (serverTime > localTime) {
+    console.log(`[Sync] Conflict resolved (Server wins): Overwriting local unsynced edits for ${store}/${id} (server: ${serverTime}, local: ${localTime})`);
+    await window.dbPutNoSync(store, serverItem);
+    return true;
+  } else {
+    console.log(`[Sync] Conflict resolved (Local wins): Keeping local unsynced edits for ${store}/${id} (server: ${serverTime}, local: ${localTime})`);
+    return false;
+  }
+}
+
 
 window.dbPutNoSync = function(store, value) {
   return new Promise(function(res, rej) {
@@ -121,18 +207,14 @@ window.updateSyncPanelUI = async function() {
 
 window.syncData = async function() {
   if (window.isSyncing) return;
+  if (!window.db) return;
 
-  var token = localStorage.getItem('token');
-  if (window.fAuth && window.fAuth.currentUser) {
-    try {
-      token = await window.fAuth.currentUser.getIdToken();
-      localStorage.setItem('token', token);
-    } catch (e) {
-      console.warn('[Sync] Failed to refresh Firebase token, using cached:', e);
-    }
+  // Ensure user is signed in before trying to sync
+  if (!window.fAuth || !window.fAuth.currentUser) {
+    console.log('[Sync] Skipped: No Firebase user signed in.');
+    window.updateSyncStatus('offline');
+    return;
   }
-
-  if (!token || !window.db) return;
 
   window.isSyncing = true;
   window.updateSyncStatus('syncing');
@@ -152,12 +234,8 @@ window.syncData = async function() {
         var recordId = store === 'settings' ? (record.key || record.id) : record.id;
         try {
           console.log('[Sync] Expunging deleted item: ' + store + '/' + recordId);
-          var delRes = await fetch('/api/sync/delete', {
+          var delRes = await authenticatedFetch('/api/sync/delete', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + token
-            },
             body: JSON.stringify({ store: store, id: recordId })
           });
           if (delRes.ok) {
@@ -192,12 +270,8 @@ window.syncData = async function() {
 
     if (unsyncedParts.length || unsyncedInvoices.length || unsyncedSubmissions.length || unsyncedActivity.length || unsyncedSettings.length) {
       console.log('[Sync] Pushing unsynced items: parts=' + unsyncedParts.length + ', invoices=' + unsyncedInvoices.length + ', submissions=' + unsyncedSubmissions.length);
-      var pushRes = await fetch('/api/sync/push', {
+      var pushRes = await authenticatedFetch('/api/sync/push', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + token
-        },
         body: JSON.stringify({
           parts: unsyncedParts,
           invoices: unsyncedInvoices,
@@ -237,12 +311,8 @@ window.syncData = async function() {
     if (lastSyncTime === Infinity) lastSyncTime = 0;
 
     console.log('[Sync] Pulling updates since ' + lastSyncTime);
-    var pullRes = await fetch('/api/sync/pull', {
+    var pullRes = await authenticatedFetch('/api/sync/pull', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + token
-      },
       body: JSON.stringify({ lastSyncTimestamp: lastSyncTime })
     });
 
@@ -281,8 +351,9 @@ window.syncData = async function() {
         sp.priceKsh = parseFloat(sp.priceKsh || sp.price) || 0;
         sp._synced = true;
         sp._deleted = sp._deleted || false;
-        await window.dbPutNoSync('parts', sp);
-        hasNewData = true;
+        if (await resolveConflictAndSave('parts', sp)) {
+          hasNewData = true;
+        }
       }
     }
 
@@ -294,8 +365,9 @@ window.syncData = async function() {
         if (typeof sinv.items === 'string') {
           try { sinv.items = JSON.parse(sinv.items); } catch(e) {}
         }
-        await window.dbPutNoSync('invoices', sinv);
-        hasNewData = true;
+        if (await resolveConflictAndSave('invoices', sinv)) {
+          hasNewData = true;
+        }
       }
     }
 
@@ -307,8 +379,9 @@ window.syncData = async function() {
         if (typeof sset.value === 'string') {
           try { sset.value = JSON.parse(sset.value); } catch(e) {}
         }
-        await window.dbPutNoSync('settings', sset);
-        hasNewData = true;
+        if (await resolveConflictAndSave('settings', sset)) {
+          hasNewData = true;
+        }
       }
     }
 
@@ -317,8 +390,9 @@ window.syncData = async function() {
         var sact = serverData.activity[i];
         sact._synced = true;
         sact._deleted = sact._deleted || false;
-        await window.dbPutNoSync('activity', sact);
-        hasNewData = true;
+        if (await resolveConflictAndSave('activity', sact)) {
+          hasNewData = true;
+        }
       }
     }
 
@@ -327,8 +401,9 @@ window.syncData = async function() {
         var ssub = serverData.submissions[i];
         ssub._synced = true;
         ssub._deleted = ssub._deleted || false;
-        await window.dbPutNoSync('submissions', ssub);
-        hasNewData = true;
+        if (await resolveConflictAndSave('submissions', ssub)) {
+          hasNewData = true;
+        }
       }
     }
 

@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import express from "express";
-import * as admin from "firebase-admin";
+import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
