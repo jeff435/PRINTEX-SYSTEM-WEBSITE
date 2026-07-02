@@ -451,12 +451,20 @@ window.openAnalyticsDetail = function(companyName) {
   const mostPurchased = itemsArr[0] || { partNum: '—', desc: 'No items', qty: 0, spend: 0 };
   const leastPurchased = itemsArr.length > 0 ? itemsArr[itemsArr.length - 1] : { partNum: '—', desc: 'No items', qty: 0, spend: 0 };
 
-  const catSpend = { A:0, B:0, C:0, D:0, E:0, F:0, G:0 };
+  // Build catSpend dynamically from all active categories
+  const _activeCatsForSpend = (window.categories && window.categories.length > 0)
+    ? window.categories.filter(c => !c._deleted)
+    : (window.DEFAULT_CATEGORIES || []).filter(c => !c._deleted);
+  const catSpend = {};
+  _activeCatsForSpend.forEach(c => { catSpend[c.code || c.name] = 0; });
   itemsArr.forEach(item => {
-    if (catSpend[item.category] !== undefined) {
-      catSpend[item.category] += item.spend;
+    const key = item.category;
+    if (catSpend[key] !== undefined) {
+      catSpend[key] += item.spend;
     } else {
-      catSpend.G += item.spend;
+      // Unknown category — bucket into first available or ignore
+      const firstKey = Object.keys(catSpend)[0];
+      if (firstKey) catSpend[firstKey] += item.spend;
     }
   });
 
@@ -610,10 +618,13 @@ window.openAnalyticsDetail = function(companyName) {
     if (window.companyCatChart) window.companyCatChart.destroy();
     const ctxCat = document.getElementById('companyCatCanvas')?.getContext('2d');
     if (ctxCat) {
-      const catKeys = ['A','B','C','D','E','F','G','J','K','L'];
-      const catLabels = ['Valves','Bellows','Gears','Cams','Grippers','Heidelberg','Sensors','Motors','Cylinders','Consumables'];
-      const catColors = Object.values(window.CAT_COLORS);
-      const catData = catKeys.map(c => catSpend[c]);
+      const _dynCats = (window.categories && window.categories.length > 0)
+        ? window.categories.filter(c => !c._deleted)
+        : (window.DEFAULT_CATEGORIES || []).filter(c => !c._deleted);
+      const catKeys = _dynCats.map(c => c.code || c.name);
+      const catLabels = _dynCats.map(c => c.name ? c.name.split(' & ')[0].split(' ')[0] : (c.code || c.name));
+      const catColors = _dynCats.map(c => c.color || window.CAT_COLORS[c.code] || '#888');
+      const catData = catKeys.map(k => catSpend[k] || 0);
 
       window.companyCatChart = new Chart(ctxCat, {
         type: 'doughnut',

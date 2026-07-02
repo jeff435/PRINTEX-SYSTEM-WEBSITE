@@ -1815,6 +1815,121 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <!-- Content populated dynamically by services.js -->
     </div>
 
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- CUSTOMERS PAGE                                                       -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <div class="page fade-in" id="page-customers">
+      <div class="kpi-grid" id="custKpiGrid" style="margin-bottom:20px"></div>
+      <div class="section-controls">
+        <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="custSearch" placeholder="Search customers..." oninput="window.biz && window.biz.filterCustomers()"/></div>
+        <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openCustomerModal()"><i class="fa fa-plus"></i> Add Customer</button>
+        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterCustomers()"><i class="fa fa-sync"></i> Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Name</th><th>Email</th><th>Phone</th><th>Company</th><th>Address</th><th>Orders</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="custBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- SUPPLIERS PAGE                                                        -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <div class="page fade-in" id="page-suppliers">
+      <div class="kpi-grid" id="supKpiGrid" style="margin-bottom:20px"></div>
+      <div class="section-controls">
+        <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="supSearch" placeholder="Search suppliers..." oninput="window.biz && window.biz.filterSuppliers()"/></div>
+        <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openSupplierModal()"><i class="fa fa-plus"></i> Add Supplier</button>
+        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterSuppliers()"><i class="fa fa-sync"></i> Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>Products</th><th>Lead Time</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="supBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- EXPENSES PAGE                                                         -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <div class="page fade-in" id="page-expenses">
+      <div class="kpi-grid" id="expKpiGrid" style="margin-bottom:20px"></div>
+      <div class="section-controls">
+        <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="expSearch" placeholder="Search expenses..." oninput="window.biz && window.biz.filterExpenses()"/></div>
+        <select class="select" style="width:auto" id="expMonthFilter" onchange="window.biz && window.biz.filterExpenses()">
+          <option value="">All Months</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openExpenseModal()"><i class="fa fa-plus"></i> Record Expense</button>
+        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.exportExpensesCSV()"><i class="fa fa-file-csv"></i> Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Date</th><th>Description</th><th>Category</th><th>Amount (KSH)</th><th>Method</th><th>Reference</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="expBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- PURCHASE ORDERS PAGE                                                  -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <div class="page fade-in" id="page-purchases">
+      <div class="kpi-grid" id="purKpiGrid" style="margin-bottom:20px"></div>
+      <div class="section-controls">
+        <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="purSearch" placeholder="Search purchase orders..." oninput="window.biz && window.biz.filterPurchases()"/></div>
+        <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openPurchaseModal()"><i class="fa fa-plus"></i> New Purchase Order</button>
+        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterPurchases()"><i class="fa fa-sync"></i> Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>PO Number</th><th>Date</th><th>Supplier</th><th>Items</th><th>Total (KSH)</th><th>Status</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="purBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- EMPLOYEES PAGE                                                        -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <div class="page fade-in" id="page-employees">
+      <div class="kpi-grid" id="empKpiGrid" style="margin-bottom:20px"></div>
+      <div class="section-controls">
+        <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="empSearch" placeholder="Search employees..." oninput="window.biz && window.biz.filterEmployees()"/></div>
+        <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openEmployeeModal()"><i class="fa fa-plus"></i> Add Employee</button>
+        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterEmployees()"><i class="fa fa-sync"></i> Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Name</th><th>Role</th><th>Phone</th><th>Email</th><th>Salary (KSH)</th><th>Start Date</th><th>Status</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="empBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- CATEGORIES PAGE                                                       -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <div class="page fade-in" id="page-categories">
+      <div class="section-controls">
+        <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="catMgmtSearch" placeholder="Search categories..." oninput="window.biz && window.biz.filterCategories()"/></div>
+        <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openCategoryModal()"><i class="fa fa-plus"></i> Add Category</button>
+        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterCategories()"><i class="fa fa-sync"></i> Refresh</button>
+      </div>
+      <div id="catMgmtGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-top:20px;"></div>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /main -->
 <!-- MOBILE BOTTOM NAV -->

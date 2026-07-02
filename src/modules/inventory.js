@@ -24,10 +24,19 @@ window.CAT_ICONS = {
 };
 
 window.getCatImage = function(cat, partId) {
-  const c = window.CAT_COLORS[cat] || '#888';
-  const d = window.CAT_ICONS[cat] || window.CAT_ICONS.G;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="44" height="44"><rect width="44" height="44" rx="8" fill="${c}22"/><path d="${d}" fill="${c}" transform="translate(2,2) scale(0.83)"/><text x="22" y="42" font-size="7" text-anchor="middle" fill="${c}" font-family="monospace" opacity="0.6">${cat}</text></svg>`;
-  return 'data:image/svg+xml;base64,' + btoa(svg);
+  const categoryObj = (window.categories || []).find(c => (c.code || c.name) === cat);
+  const color = categoryObj?.color || window.CAT_COLORS[cat] || '#888';
+  const icon = categoryObj?.icon || window.CAT_ICONS[cat] || '🏷️';
+  
+  let innerHtml = '';
+  if (typeof icon === 'string' && icon.startsWith('M')) {
+    innerHtml = `<path d="${icon}" fill="${color}" transform="translate(2,2) scale(0.83)"/>`;
+  } else {
+    innerHtml = `<text x="12" y="15" font-size="12" text-anchor="middle" dominant-baseline="middle">${icon}</text>`;
+  }
+  
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="44" height="44"><rect width="24" height="24" rx="6" fill="${color}22" stroke="${color}" stroke-width="1"/><g>${innerHtml}</g></svg>`;
+  return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
 };
 
 window.stockStatus = function(p) {
@@ -131,12 +140,15 @@ window.adjustStock = async function(id, delta) {
 };
 
 window.openAddPart = function() {
+  // Ensure category dropdown is populated from current window.categories
+  if (typeof window.populateCategorySelects === 'function') window.populateCategorySelects();
   document.getElementById('partModalTitle').textContent = 'Add New Part';
   document.getElementById('editPartId').value = '';
   ['fPartNum','fDesc','fSupplier','fPriceKsh','fLocation'].forEach(id => {
     document.getElementById(id).value = '';
   });
-  document.getElementById('fCat').value = 'A';
+  const fCat = document.getElementById('fCat');
+  if (fCat && fCat.options.length > 0) fCat.selectedIndex = 0;
   document.getElementById('fStock').value = '0';
   document.getElementById('fMinStock').value = '1';
   document.getElementById('fImage').value = '';
@@ -147,6 +159,8 @@ window.openAddPart = function() {
 window.openEditPart = function(id) {
   const p = window.parts.find(x => String(x.id) === String(id));
   if (!p) { window.showToast('Part not found — try refreshing', 'error'); return; }
+  // Ensure category dropdown is populated before setting the value
+  if (typeof window.populateCategorySelects === 'function') window.populateCategorySelects();
   document.getElementById('partModalTitle').textContent = 'Edit Part';
   document.getElementById('editPartId').value = String(p.id);
   document.getElementById('fPartNum').value = p.partNum || p.part_num || '';
@@ -361,10 +375,14 @@ window.renderDashboard = function() {
     }, 50);
   }
 
-  const cats = ['A','B','C','D','E','F','G','J','K','L'];
-  const catLabels = ['Valves','Bellows','Gears','Cams','Grippers','Heidelberg','Sensors','Motors','Cylinders','Consumables'];
-  const catStock = cats.map(c => physicalParts.filter(p=>p.category===c).reduce((s,p)=>s+p.stock,0));
-  const catColors = cats.map(c => window.CAT_COLORS[c]);
+  // Use dynamic categories from DB; fall back to DEFAULT_CATEGORIES if not yet loaded
+  const activeCats = (window.categories && window.categories.length > 0)
+    ? window.categories.filter(c => !c._deleted)
+    : (window.DEFAULT_CATEGORIES || []).filter(c => !c._deleted);
+  const cats = activeCats.map(c => c.code || c.name);
+  const catLabels = activeCats.map(c => c.name ? c.name.split(' & ')[0].split(' ')[0] : (c.code || c.name));
+  const catStock = cats.map(code => physicalParts.filter(p => p.category === code).reduce((s,p) => s+p.stock, 0));
+  const catColors = activeCats.map(c => c.color || window.CAT_COLORS[c.code] || '#888');
 
   const canvas1 = document.getElementById('catChart');
   if (canvas1) {

@@ -46,6 +46,11 @@
       employees  = (await window.dbGet('employees'))  || [];
       categories = (await window.dbGet('categories')) || [];
       purchases  = (await window.dbGet('purchases'))  || [];
+      // Keep global window.categories in sync so inventory dropdowns work
+      window.categories = categories.filter(c => !c._deleted);
+      if (typeof window.populateCategorySelects === 'function') {
+        window.populateCategorySelects();
+      }
     } catch(e) {
       console.warn('[Business] Failed to load from IndexedDB:', e);
     }
@@ -379,14 +384,16 @@
       grid.innerHTML = `<div style="text-align:center;color:var(--dim);padding:40px;grid-column:1/-1"><i class="fa fa-tags" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No categories found.</div>`;
       return;
     }
-    grid.innerHTML = filtered.map(c => `
+    grid.innerHTML = filtered.map(c => {
+      const partCount = (window.parts || []).filter(p => !p._deleted && p.category === (c.code || c.name)).length;
+      return `
       <div class="card" style="padding:16px;cursor:default">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <div style="display:flex;align-items:center;gap:10px">
             <div style="width:36px;height:36px;border-radius:10px;background:${c.color||'var(--accent-glow)'};border:1px solid ${c.color||'var(--border)'};display:flex;align-items:center;justify-content:center;font-size:18px">${c.icon||'🏷️'}</div>
             <div>
               <div style="font-weight:700;font-size:14px">${esc(c.name)}</div>
-              <div style="font-size:11px;color:var(--muted)">${c.partCount||0} parts</div>
+              <div style="font-size:11px;color:var(--muted)">${partCount} parts</div>
             </div>
           </div>
           <div style="display:flex;gap:4px">
@@ -395,7 +402,8 @@
           </div>
         </div>
         <div style="font-size:12px;color:var(--muted);line-height:1.5">${esc(c.description)||'No description'}</div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 
   function openCategoryModal(id) {
@@ -537,6 +545,14 @@
       await window.dbPut(store, record);
       const modalId = { customers:'custModal', suppliers:'supModal', expenses:'expModal', employees:'empModal', categories:'catMgmtModal', purchases:'purModal' }[store];
       closeModal(modalId);
+      // If categories changed, refresh global window.categories and update all dropdowns
+      if (store === 'categories') {
+        categories = (await window.dbGet('categories')) || [];
+        window.categories = categories.filter(c => !c._deleted);
+        if (typeof window.populateCategorySelects === 'function') {
+          window.populateCategorySelects();
+        }
+      }
       refreshPage(store);
       window.showToast && window.showToast('✅ Saved successfully!', 'success');
       window.syncData && window.syncData();
@@ -554,6 +570,14 @@
       item._deleted = true;
       try {
         await window.dbPut(store, item);
+        // If categories changed, refresh global window.categories and update all dropdowns
+        if (store === 'categories') {
+          categories = (await window.dbGet('categories')) || [];
+          window.categories = categories.filter(c => !c._deleted);
+          if (typeof window.populateCategorySelects === 'function') {
+            window.populateCategorySelects();
+          }
+        }
         refreshPage(store);
         window.showToast && window.showToast('🗑️ Deleted.', 'success');
         window.syncData && window.syncData();

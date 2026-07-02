@@ -76,6 +76,30 @@ window.expenses = [];
 window.employees = [];
 window.purchases = [];
 
+window.DEFAULT_CATEGORIES = [
+  { name: 'Valves & Pneumatic Parts', code: 'A', icon: '🔧', color: '#ff6b6b' },
+  { name: 'Bellows & Autoplate Parts', code: 'B', icon: '📁', color: '#ffa94d' },
+  { name: 'Bearings & Gears', code: 'C', icon: '⚙️', color: '#69db7c' },
+  { name: 'Cam Followers', code: 'D', icon: '⛓️', color: '#74c0fc' },
+  { name: 'Grippers & Separators', code: 'E', icon: '✂️', color: '#da77f2' },
+  { name: 'Heidelberg Parts', code: 'F', icon: '🖨️', color: '#f783ac' },
+  { name: 'Sensors & Electronics', code: 'G', icon: '🔌', color: '#63e6be' },
+  { name: 'Motors & Belts', code: 'J', icon: '🎡', color: '#ff922b' },
+  { name: 'Cylinders', code: 'K', icon: '🛢️', color: '#20c997' },
+  { name: 'Consumables', code: 'L', icon: '📦', color: '#fcc419' }
+].map(cat => ({
+  ...cat,
+  id: 'cat_' + cat.code.toLowerCase(),
+  partCount: 0,
+  _seen: true,
+  _deleted: false,
+  _flagged: false,
+  _draft: false,
+  _modSeq: 0,
+  _synced: false,
+  _lastUpdated: Date.now()
+}));
+
 window.db = null;
 window.tabSessionId = 'tab_' + Math.random().toString(36).substring(2, 9);
 
@@ -130,6 +154,7 @@ window.dbGet = function(store, key, includeDeleted) {
       }
       if (key !== undefined) return resolve(null);
       if (store === 'parts') return resolve(filterDeleted(window.DEFAULT_PARTS || []));
+      if (store === 'categories') return resolve(filterDeleted(window.DEFAULT_CATEGORIES || []));
       return resolve([]);
     };
 
@@ -809,6 +834,35 @@ window.initializeFirestoreListeners = async function(userId) {
     } else if (store === 'submissions') {
       window.submissions = mergedData;
       if (typeof window.renderFreelancePage === 'function') window.renderFreelancePage();
+    } else if (['customers', 'suppliers', 'expenses', 'employees', 'categories', 'purchases'].includes(store)) {
+      window[store] = mergedData;
+      
+      // Special logic for categories: update dynamic select options across the app
+      if (store === 'categories') {
+        const activeCats = mergedData.filter(c => !c._deleted);
+        if (activeCats.length === 0) {
+          // Trigger default categories seeding in background
+          window.seedDefaultCategories(userId).catch(e => console.error('[updateAndRender] Default categories seeding failed:', e));
+        } else {
+          if (typeof window.populateCategorySelects === 'function') {
+            window.populateCategorySelects();
+          }
+        }
+      }
+      
+      // Let the business module reload state if initialized
+      if (window.biz && typeof window.biz.init === 'function') {
+        window.biz.init().then(() => {
+          // If current active page is the updated store, refresh it
+          const currentActivePage = document.querySelector('.page.active')?.id?.replace('page-', '');
+          if (currentActivePage === store) {
+            const renderFnName = 'filter' + store.charAt(0).toUpperCase() + store.slice(1);
+            if (typeof window.biz[renderFnName] === 'function') {
+              window.biz[renderFnName]();
+            }
+          }
+        });
+      }
     }
 
     if (typeof window.renderDashboard === 'function') window.renderDashboard();
@@ -850,7 +904,13 @@ window.initializeFirestoreListeners = async function(userId) {
     migrateOwnerId('invoices'),
     migrateOwnerId('settings'),
     migrateOwnerId('activity'),
-    migrateOwnerId('submissions')
+    migrateOwnerId('submissions'),
+    migrateOwnerId('customers'),
+    migrateOwnerId('suppliers'),
+    migrateOwnerId('expenses'),
+    migrateOwnerId('employees'),
+    migrateOwnerId('categories'),
+    migrateOwnerId('purchases')
   ]).then(() => {
     console.log('[Migration] All ownerId background migrations completed.');
   }).catch(e => {
@@ -934,6 +994,96 @@ window.initializeFirestoreListeners = async function(userId) {
     window.updateSyncStatus('offline');
   });
   firestoreListeners.push(submissionsUnsub);
+
+  // 6. Listen to customers
+  const customersUnsub = window.fDb.collection(`users/${userId}/customers`).onSnapshot(snapshot => {
+    const docs = [];
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      d.id = doc.id;
+      docs.push(d);
+    });
+    updateAndRender('customers', docs);
+  }, err => {
+    console.error("Customers sync error:", err);
+    window.updateSyncStatus('offline');
+  });
+  firestoreListeners.push(customersUnsub);
+
+  // 7. Listen to suppliers
+  const suppliersUnsub = window.fDb.collection(`users/${userId}/suppliers`).onSnapshot(snapshot => {
+    const docs = [];
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      d.id = doc.id;
+      docs.push(d);
+    });
+    updateAndRender('suppliers', docs);
+  }, err => {
+    console.error("Suppliers sync error:", err);
+    window.updateSyncStatus('offline');
+  });
+  firestoreListeners.push(suppliersUnsub);
+
+  // 8. Listen to expenses
+  const expensesUnsub = window.fDb.collection(`users/${userId}/expenses`).onSnapshot(snapshot => {
+    const docs = [];
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      d.id = doc.id;
+      docs.push(d);
+    });
+    updateAndRender('expenses', docs);
+  }, err => {
+    console.error("Expenses sync error:", err);
+    window.updateSyncStatus('offline');
+  });
+  firestoreListeners.push(expensesUnsub);
+
+  // 9. Listen to employees
+  const employeesUnsub = window.fDb.collection(`users/${userId}/employees`).onSnapshot(snapshot => {
+    const docs = [];
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      d.id = doc.id;
+      docs.push(d);
+    });
+    updateAndRender('employees', docs);
+  }, err => {
+    console.error("Employees sync error:", err);
+    window.updateSyncStatus('offline');
+  });
+  firestoreListeners.push(employeesUnsub);
+
+  // 10. Listen to categories
+  const categoriesUnsub = window.fDb.collection(`users/${userId}/categories`).onSnapshot(snapshot => {
+    const docs = [];
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      d.id = doc.id;
+      docs.push(d);
+    });
+    updateAndRender('categories', docs);
+  }, err => {
+    console.error("Categories sync error:", err);
+    window.updateSyncStatus('offline');
+  });
+  firestoreListeners.push(categoriesUnsub);
+
+  // 11. Listen to purchases
+  const purchasesUnsub = window.fDb.collection(`users/${userId}/purchases`).onSnapshot(snapshot => {
+    const docs = [];
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      d.id = doc.id;
+      docs.push(d);
+    });
+    updateAndRender('purchases', docs);
+  }, err => {
+    console.error("Purchases sync error:", err);
+    window.updateSyncStatus('offline');
+  });
+  firestoreListeners.push(purchasesUnsub);
 };
 
 // Spinner helpers
@@ -1266,7 +1416,7 @@ window.executeSelectedMigration = async function() {
     if (option === 'merge') {
       // Run local-to-cloud migration
       if (!window.db) await window.openDB();
-      const stores = ['parts', 'invoices', 'activity', 'settings', 'submissions'];
+      const stores = ['parts', 'invoices', 'activity', 'settings', 'submissions', 'customers', 'suppliers', 'expenses', 'employees', 'categories', 'purchases'];
       let totalMigrated = 0;
       
       for (const store of stores) {
@@ -1308,7 +1458,7 @@ window.executeSelectedMigration = async function() {
     } else if (option === 'overwrite') {
       // Clear IndexedDB stores completely and rely solely on Firestore
       if (!window.db) await window.openDB();
-      const stores = ['parts', 'invoices', 'activity', 'settings', 'submissions'];
+      const stores = ['parts', 'invoices', 'activity', 'settings', 'submissions', 'customers', 'suppliers', 'expenses', 'employees', 'categories', 'purchases'];
       for (const store of stores) {
         try {
           const tx = window.db.transaction(store, 'readwrite');
@@ -1321,6 +1471,12 @@ window.executeSelectedMigration = async function() {
       window.submissions = [];
       window.settings = {};
       window.activityLog = [];
+      window.customers = [];
+      window.suppliers = [];
+      window.expenses = [];
+      window.employees = [];
+      window.categories = [];
+      window.purchases = [];
       
       window.showToast('🧹 Local cache cleared. Loading clean cloud data...', 'success');
       
@@ -1446,6 +1602,28 @@ window.showApp = function() {
   if (typeof window.renderAnalytics === 'function') window.renderAnalytics();
   if (typeof window.initCreateInvoice === 'function') window.initCreateInvoice();
   if (typeof window.updateBottomNavBadge === 'function') window.updateBottomNavBadge();
+
+  // Ensure category dropdowns (fCat, catFilter) are populated on startup
+  // Use window.categories if already loaded, otherwise load from DB
+  const _populateCats = () => {
+    if (window.categories && window.categories.length > 0) {
+      if (typeof window.populateCategorySelects === 'function') window.populateCategorySelects();
+    } else {
+      // Load categories from IndexedDB and populate
+      window.dbGet('categories').then(cats => {
+        window.categories = (cats || []).filter(c => !c._deleted);
+        if (window.categories.length === 0) {
+          // Fall back to DEFAULT_CATEGORIES
+          window.categories = (window.DEFAULT_CATEGORIES || []).filter(c => !c._deleted);
+        }
+        if (typeof window.populateCategorySelects === 'function') window.populateCategorySelects();
+      }).catch(() => {
+        window.categories = (window.DEFAULT_CATEGORIES || []).filter(c => !c._deleted);
+        if (typeof window.populateCategorySelects === 'function') window.populateCategorySelects();
+      });
+    }
+  };
+  _populateCats();
 
   // Load saved API key into AI panel if applicable.
   if (typeof window.getAIKey === 'function') {
@@ -1756,6 +1934,106 @@ window.seedDefaultParts = async function() {
     console.log('[seedDefaultParts] ✅ Complete: ' + window.parts.length + ' parts seeded successfully.');
   } finally {
     window._isSeeding = false;
+  }
+};
+
+window.populateCategorySelects = function() {
+  const cats = window.categories || [];
+  
+  // 1. Update fCat (Part Modal dropdown)
+  const fCatSelect = document.getElementById('fCat');
+  if (fCatSelect) {
+    fCatSelect.innerHTML = cats.map(c => 
+      `<option value="${window.esc(c.code || c.name)}">${window.esc(c.code || c.name)} – ${window.esc(c.name)}</option>`
+    ).join('') || '<option value="">No categories defined</option>';
+  }
+
+  // 2. Update catFilter (Inventory page filter dropdown)
+  const catFilterSelect = document.getElementById('catFilter');
+  if (catFilterSelect) {
+    const currentValue = catFilterSelect.value;
+    catFilterSelect.innerHTML = '<option value="">All Categories</option>' + 
+      cats.map(c => 
+        `<option value="${window.esc(c.code || c.name)}">${window.esc(c.code || c.name)} – ${window.esc(c.name)}</option>`
+      ).join('');
+    catFilterSelect.value = currentValue; // restore selected value
+  }
+};
+
+window.seedDefaultCategories = async function(userId) {
+  const defaultCats = [
+    { name: 'Valves & Pneumatic Parts', code: 'A', icon: '🔧', color: '#ff6b6b' },
+    { name: 'Bellows & Autoplate Parts', code: 'B', icon: '📁', color: '#ffa94d' },
+    { name: 'Bearings & Gears', code: 'C', icon: '⚙️', color: '#69db7c' },
+    { name: 'Cam Followers', code: 'D', icon: '⛓️', color: '#74c0fc' },
+    { name: 'Grippers & Separators', code: 'E', icon: '✂️', color: '#da77f2' },
+    { name: 'Heidelberg Parts', code: 'F', icon: '🖨️', color: '#f783ac' },
+    { name: 'Sensors & Electronics', code: 'G', icon: '🔌', color: '#63e6be' },
+    { name: 'Motors & Belts', code: 'J', icon: '🎡', color: '#ff922b' },
+    { name: 'Cylinders', code: 'K', icon: '🛢️', color: '#20c997' },
+    { name: 'Consumables', code: 'L', icon: '📦', color: '#fcc419' }
+  ];
+
+  console.log('[seedDefaultCategories] Seeding default categories...');
+
+  // Write to IndexedDB
+  if (window.db) {
+    await new Promise((resolve, reject) => {
+      const tx = window.db.transaction('categories', 'readwrite');
+      const os = tx.objectStore('categories');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+
+      for (const cat of defaultCats) {
+        const item = { 
+          ...cat, 
+          id: 'cat_' + cat.code.toLowerCase(), 
+          partCount: 0,
+          _seen: true,
+          _deleted: false,
+          _flagged: false,
+          _draft: false,
+          _modSeq: 0,
+          _synced: false,
+          _lastUpdated: Date.now()
+        };
+        if (userId) {
+          item.ownerId = userId;
+          item._synced = true;
+        }
+        os.put(item);
+      }
+    });
+  }
+
+  // Write to Firestore
+  if (userId && window.fDb) {
+    const writeBatch = window.fDb.batch();
+    for (const cat of defaultCats) {
+      const item = { 
+        ...cat, 
+        id: 'cat_' + cat.code.toLowerCase(), 
+        partCount: 0,
+        _seen: true,
+        _deleted: false,
+        _flagged: false,
+        _draft: false,
+        _modSeq: 0,
+        _synced: true,
+        ownerId: userId,
+        _lastUpdated: Date.now()
+      };
+      const docRef = window.fDb.collection(`users/${userId}/categories`).doc(item.id);
+      writeBatch.set(docRef, item);
+    }
+    await writeBatch.commit();
+  }
+
+  // Load into window
+  const allCats = await window.dbGet('categories');
+  window.categories = allCats || [];
+  if (typeof window.populateCategorySelects === 'function') {
+    window.populateCategorySelects();
   }
 };
 
