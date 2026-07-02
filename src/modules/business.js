@@ -652,47 +652,38 @@
     await loadAll();
   }
 
-  // Intercept page navigation to reload data
-  const origShowPage = window.showPage;
-  window.showPage = function(page, el) {
-    if (origShowPage) origShowPage(page, el);
-    const reloadMap = {
-      customers: () => { loadAll().then(renderCustomers); },
-      suppliers: () => { loadAll().then(renderSuppliers); },
-      expenses:  () => { loadAll().then(renderExpenses); },
-      employees: () => { loadAll().then(renderEmployees); },
-      categories:() => { loadAll().then(renderCategories); },
-      purchases: () => { loadAll().then(renderPurchases); }
-    };
-    if (reloadMap[page]) setTimeout(reloadMap[page], 50);
-  };
+  // Explicit reload and render functions
+  async function loadAndRender(store, renderFn) {
+    await loadAll();
+    renderFn();
+  }
 
   // Expose public API
   window.biz = {
     init,
     // Customers
-    filterCustomers: renderCustomers,
+    filterCustomers: () => loadAndRender('customers', renderCustomers),
     openCustomerModal: () => openCustomerModal(),
     editCustomer: id => openCustomerModal(id),
     // Suppliers
-    filterSuppliers: renderSuppliers,
+    filterSuppliers: () => loadAndRender('suppliers', renderSuppliers),
     openSupplierModal: () => openSupplierModal(),
     editSupplier: id => openSupplierModal(id),
     // Expenses
-    filterExpenses: renderExpenses,
+    filterExpenses: () => loadAndRender('expenses', renderExpenses),
     openExpenseModal: () => openExpenseModal(),
     editExpense: id => openExpenseModal(id),
     exportExpensesCSV,
     // Employees
-    filterEmployees: renderEmployees,
+    filterEmployees: () => loadAndRender('employees', renderEmployees),
     openEmployeeModal: () => openEmployeeModal(),
     editEmployee: id => openEmployeeModal(id),
     // Categories
-    filterCategories: renderCategories,
+    filterCategories: () => loadAndRender('categories', renderCategories),
     openCategoryModal: () => openCategoryModal(),
     editCategory: id => openCategoryModal(id),
     // Purchases
-    filterPurchases: renderPurchases,
+    filterPurchases: () => loadAndRender('purchases', renderPurchases),
     openPurchaseModal: () => openPurchaseModal(),
     editPurchase: id => openPurchaseModal(id),
     // Common

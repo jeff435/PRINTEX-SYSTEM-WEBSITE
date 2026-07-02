@@ -1488,7 +1488,13 @@ const pageTitles = {
   reports:'Reports',
   analytics:'Company Analytics',
   ai:'AI Assistant',
-  settings:'Settings'
+  settings:'Settings',
+  customers:'Customers Directory',
+  suppliers:'Suppliers Registry',
+  expenses:'Company Expenses',
+  purchases:'Purchase Orders',
+  employees:'Employee Management',
+  categories:'Product Categories'
 };
 
 window.showPage = function(id, navEl) {
@@ -1517,6 +1523,14 @@ window.showPage = function(id, navEl) {
   if (id==='createInvoice' && typeof window.initCreateInvoice === 'function') window.initCreateInvoice();
   if (id==='freelance' && typeof window.renderFreelancePage === 'function') window.renderFreelancePage();
   if (id==='services' && typeof window.renderServicesPage === 'function') window.renderServicesPage();
+  
+  // Business records pages rendering triggers
+  if (id==='customers' && window.biz && typeof window.biz.filterCustomers === 'function') window.biz.filterCustomers();
+  if (id==='suppliers' && window.biz && typeof window.biz.filterSuppliers === 'function') window.biz.filterSuppliers();
+  if (id==='expenses' && window.biz && typeof window.biz.filterExpenses === 'function') window.biz.filterExpenses();
+  if (id==='purchases' && window.biz && typeof window.biz.filterPurchases === 'function') window.biz.filterPurchases();
+  if (id==='employees' && window.biz && typeof window.biz.filterEmployees === 'function') window.biz.filterEmployees();
+  if (id==='categories' && window.biz && typeof window.biz.filterCategories === 'function') window.biz.filterCategories();
 };
 
 window.toggleSidebar = function() {

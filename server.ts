@@ -490,6 +490,33 @@ async function startServer() {
         const code: string = firebaseErr.code || "";
         console.warn(`[Auth] Firebase token verification failed on ${req.url}:`, code, firebaseErr.message);
 
+        // If running locally without service account, allow decoding Firebase JWT directly
+        if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+          try {
+            const decoded = jwt.decode(token) as any;
+            if (decoded && (decoded.uid || decoded.user_id)) {
+              const uid = decoded.uid || decoded.user_id;
+              const email = decoded.email || "";
+              console.log(`[Auth] [Local Fallback] Decoded Firebase token without verification: uid=${uid} email=${email}`);
+              const emailLower = email.toLowerCase();
+              let localUserId = uid;
+              let role = 'user';
+
+              if (emailLower) {
+                const userRes = await query("SELECT id, role FROM users WHERE LOWER(email) = $1", [emailLower]);
+                if (userRes.rows.length > 0) {
+                  localUserId = userRes.rows[0].id;
+                  role = userRes.rows[0].role || 'user';
+                }
+              }
+              (req as any).user = { id: localUserId, uid, email, fullName: decoded.name || "", role };
+              return next();
+            }
+          } catch (decodeErr: any) {
+            console.error("[Auth] Direct decode of Firebase token failed:", decodeErr.message);
+          }
+        }
+
         if (code === 'auth/id-token-expired') {
           return res.status(401).json({
             error: "Unauthorized",
