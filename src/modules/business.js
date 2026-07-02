@@ -1,0 +1,713 @@
+// ═══════════════════════════════════════════════════════════════════
+// BUSINESS MODULE — Customers, Suppliers, Expenses, Employees, Categories, Purchases
+// Printex Business Platform
+// ═══════════════════════════════════════════════════════════════════
+
+(function() {
+  'use strict';
+
+  // ── State ──────────────────────────────────────────────────────────
+  let customers  = [];
+  let suppliers  = [];
+  let expenses   = [];
+  let employees  = [];
+  let categories = [];
+  let purchases  = [];
+  let editingId  = null;
+  let editingStore = null;
+
+  // ── KPI Helper ─────────────────────────────────────────────────────
+  function renderKpiGrid(containerId, kpis) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = kpis.map(k => `
+      <div class="kpi-card" style="--kpi-color:${k.color}">
+        <div class="kpi-label"><i class="fa ${k.icon}" style="color:${k.color}"></i> ${k.label}</div>
+        <div class="kpi-value" style="color:${k.color}">${k.value}</div>
+        ${k.sub ? `<div class="kpi-sub">${k.sub}</div>` : ''}
+      </div>`).join('');
+  }
+
+  function fmtKsh(n) {
+    return 'KSH ' + (Number(n)||0).toLocaleString('en-KE');
+  }
+
+  // ── Generic Modal Helper ────────────────────────────────────────────
+  function openModal(id) { const m = document.getElementById(id); if(m) m.style.display='flex'; }
+  function closeModal(id) { const m = document.getElementById(id); if(m) m.style.display='none'; }
+  window.bizCloseModal = closeModal;
+
+  // ── Load from IndexedDB ─────────────────────────────────────────────
+  async function loadAll() {
+    try {
+      customers  = (await window.dbGet('customers'))  || [];
+      suppliers  = (await window.dbGet('suppliers'))  || [];
+      expenses   = (await window.dbGet('expenses'))   || [];
+      employees  = (await window.dbGet('employees'))  || [];
+      categories = (await window.dbGet('categories')) || [];
+      purchases  = (await window.dbGet('purchases'))  || [];
+    } catch(e) {
+      console.warn('[Business] Failed to load from IndexedDB:', e);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // CUSTOMERS
+  // ═══════════════════════════════════════════════════════════════════
+  function renderCustomers() {
+    const search = (document.getElementById('custSearch')?.value || '').toLowerCase();
+    const filtered = customers.filter(c =>
+      !c._deleted &&
+      (c.name?.toLowerCase().includes(search) ||
+       c.email?.toLowerCase().includes(search) ||
+       c.phone?.toLowerCase().includes(search) ||
+       c.company?.toLowerCase().includes(search))
+    );
+
+    renderKpiGrid('custKpiGrid', [
+      { label:'Total Customers', value: customers.filter(c=>!c._deleted).length, icon:'fa-users', color:'var(--accent)', sub:'All registered' },
+      { label:'With Email', value: customers.filter(c=>!c._deleted && c.email).length, icon:'fa-envelope', color:'var(--success)', sub:'Reachable' },
+      { label:'Companies', value: customers.filter(c=>!c._deleted && c.company).length, icon:'fa-building', color:'var(--gold)', sub:'Corporate accounts' }
+    ]);
+
+    const tbody = document.getElementById('custBody');
+    if (!tbody) return;
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-users" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No customers found.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = filtered.map(c => `
+      <tr>
+        <td><strong>${esc(c.name)}</strong></td>
+        <td>${esc(c.email) || '<span style="color:var(--dim)">—</span>'}</td>
+        <td>${esc(c.phone) || '<span style="color:var(--dim)">—</span>'}</td>
+        <td>${esc(c.company) || '<span style="color:var(--dim)">—</span>'}</td>
+        <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.address) || '<span style="color:var(--dim)">—</span>'}</td>
+        <td><span class="badge">${c.orderCount || 0}</span></td>
+        <td>
+          <button class="btn btn-xs btn-outline" onclick="window.biz.editCustomer('${c.id}')"><i class="fa fa-edit"></i></button>
+          <button class="btn btn-xs btn-danger" onclick="window.biz.deleteRecord('customers','${c.id}')"><i class="fa fa-trash"></i></button>
+        </td>
+      </tr>`).join('');
+  }
+
+  function openCustomerModal(id) {
+    editingId = id || null;
+    editingStore = 'customers';
+    const c = id ? customers.find(x=>x.id===id) : {};
+    const isEdit = !!c?.id;
+
+    ensureModal('custModal', `
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa fa-user-plus" style="color:var(--accent)"></i> ${isEdit ? 'Edit Customer' : 'Add Customer'}</div>
+        <button class="modal-close" onclick="bizCloseModal('custModal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row col2">
+          <div class="field"><label>Full Name *</label><input class="input" id="bf_name" value="${esc(c?.name||'')}" placeholder="John Doe"/></div>
+          <div class="field"><label>Company</label><input class="input" id="bf_company" value="${esc(c?.company||'')}" placeholder="ABC Ltd"/></div>
+        </div>
+        <div class="form-row col2">
+          <div class="field"><label>Email</label><input class="input" type="email" id="bf_email" value="${esc(c?.email||'')}" placeholder="john@example.com"/></div>
+          <div class="field"><label>Phone</label><input class="input" id="bf_phone" value="${esc(c?.phone||'')}" placeholder="+254 700 000000"/></div>
+        </div>
+        <div class="field"><label>Address</label><textarea class="input" id="bf_address" rows="2" placeholder="Physical address">${esc(c?.address||'')}</textarea></div>
+        <div class="field"><label>Notes</label><textarea class="input" id="bf_notes" rows="2" placeholder="Any extra notes...">${esc(c?.notes||'')}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="bizCloseModal('custModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="window.biz.saveRecord('customers')"><i class="fa fa-save"></i> Save Customer</button>
+      </div>`);
+    openModal('custModal');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SUPPLIERS
+  // ═══════════════════════════════════════════════════════════════════
+  function renderSuppliers() {
+    const search = (document.getElementById('supSearch')?.value || '').toLowerCase();
+    const filtered = suppliers.filter(s =>
+      !s._deleted &&
+      (s.name?.toLowerCase().includes(search) ||
+       s.contact?.toLowerCase().includes(search) ||
+       s.products?.toLowerCase().includes(search))
+    );
+
+    renderKpiGrid('supKpiGrid', [
+      { label:'Total Suppliers', value: suppliers.filter(s=>!s._deleted).length, icon:'fa-industry', color:'var(--accent)', sub:'All registered' },
+      { label:'Active', value: suppliers.filter(s=>!s._deleted && s.status!=='inactive').length, icon:'fa-check-circle', color:'var(--success)', sub:'Active suppliers' },
+      { label:'Avg Lead Time', value: (suppliers.filter(s=>!s._deleted&&s.leadDays).reduce((a,s)=>a+(s.leadDays||0),0) / (suppliers.filter(s=>!s._deleted&&s.leadDays).length||1)).toFixed(0) + 'd', icon:'fa-clock', color:'var(--gold)', sub:'Average days' }
+    ]);
+
+    const tbody = document.getElementById('supBody');
+    if (!tbody) return;
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-industry" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No suppliers found.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = filtered.map(s => `
+      <tr>
+        <td><strong>${esc(s.name)}</strong></td>
+        <td>${esc(s.contact) || '<span style="color:var(--dim)">—</span>'}</td>
+        <td>${esc(s.phone) || '<span style="color:var(--dim)">—</span>'}</td>
+        <td>${esc(s.email) || '<span style="color:var(--dim)">—</span>'}</td>
+        <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(s.products) || '<span style="color:var(--dim)">—</span>'}</td>
+        <td>${s.leadDays ? s.leadDays + 'd' : '<span style="color:var(--dim)">—</span>'}</td>
+        <td>
+          <button class="btn btn-xs btn-outline" onclick="window.biz.editSupplier('${s.id}')"><i class="fa fa-edit"></i></button>
+          <button class="btn btn-xs btn-danger" onclick="window.biz.deleteRecord('suppliers','${s.id}')"><i class="fa fa-trash"></i></button>
+        </td>
+      </tr>`).join('');
+  }
+
+  function openSupplierModal(id) {
+    editingId = id || null;
+    editingStore = 'suppliers';
+    const s = id ? suppliers.find(x=>x.id===id) : {};
+
+    ensureModal('supModal', `
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa fa-industry" style="color:var(--accent)"></i> ${id ? 'Edit Supplier' : 'Add Supplier'}</div>
+        <button class="modal-close" onclick="bizCloseModal('supModal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row col2">
+          <div class="field"><label>Supplier Name *</label><input class="input" id="bf_name" value="${esc(s?.name||'')}" placeholder="Heidelberg GmbH"/></div>
+          <div class="field"><label>Contact Person</label><input class="input" id="bf_contact" value="${esc(s?.contact||'')}" placeholder="Jane Smith"/></div>
+        </div>
+        <div class="form-row col2">
+          <div class="field"><label>Phone</label><input class="input" id="bf_phone" value="${esc(s?.phone||'')}" placeholder="+49 6222 82 0"/></div>
+          <div class="field"><label>Email</label><input class="input" type="email" id="bf_email" value="${esc(s?.email||'')}" placeholder="orders@supplier.com"/></div>
+        </div>
+        <div class="form-row col2">
+          <div class="field"><label>Products Supplied</label><input class="input" id="bf_products" value="${esc(s?.products||'')}" placeholder="Cylinders, Bearings..."/></div>
+          <div class="field"><label>Lead Time (days)</label><input class="input" type="number" id="bf_leadDays" value="${s?.leadDays||''}" placeholder="14"/></div>
+        </div>
+        <div class="field"><label>Address</label><textarea class="input" id="bf_address" rows="2">${esc(s?.address||'')}</textarea></div>
+        <div class="field"><label>Notes</label><textarea class="input" id="bf_notes" rows="2">${esc(s?.notes||'')}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="bizCloseModal('supModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="window.biz.saveRecord('suppliers')"><i class="fa fa-save"></i> Save Supplier</button>
+      </div>`);
+    openModal('supModal');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // EXPENSES
+  // ═══════════════════════════════════════════════════════════════════
+  function renderExpenses() {
+    const search = (document.getElementById('expSearch')?.value || '').toLowerCase();
+    const month  = document.getElementById('expMonthFilter')?.value || '';
+    const filtered = expenses.filter(e =>
+      !e._deleted &&
+      (e.description?.toLowerCase().includes(search) || e.category?.toLowerCase().includes(search)) &&
+      (!month || (e.date||'').startsWith(month))
+    );
+
+    // Populate month filter
+    const months = [...new Set(expenses.filter(e=>!e._deleted&&e.date).map(e=>e.date.substring(0,7)))].sort().reverse();
+    const mf = document.getElementById('expMonthFilter');
+    if (mf && mf.options.length <= 1) {
+      months.forEach(m => { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; mf.appendChild(opt); });
+    }
+
+    const total = filtered.reduce((a,e)=>a+(Number(e.amount)||0),0);
+    const monthTotal = expenses.filter(e=>!e._deleted&&(e.date||'').startsWith(new Date().toISOString().substring(0,7))).reduce((a,e)=>a+(Number(e.amount)||0),0);
+
+    renderKpiGrid('expKpiGrid', [
+      { label:'Total Expenses', value: fmtKsh(expenses.filter(e=>!e._deleted).reduce((a,e)=>a+(Number(e.amount)||0),0)), icon:'fa-receipt', color:'var(--danger)', sub:'All time' },
+      { label:'This Month', value: fmtKsh(monthTotal), icon:'fa-calendar', color:'var(--warn)', sub:new Date().toLocaleDateString('en-KE',{month:'long',year:'numeric'}) },
+      { label:'Filtered Total', value: fmtKsh(total), icon:'fa-filter', color:'var(--accent)', sub:`${filtered.length} records` }
+    ]);
+
+    const tbody = document.getElementById('expBody');
+    if (!tbody) return;
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-receipt" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No expenses found.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = filtered.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e => `
+      <tr>
+        <td style="font-family:var(--font-mono);font-size:12px">${esc(e.date) || '—'}</td>
+        <td><strong>${esc(e.description)}</strong></td>
+        <td><span class="badge badge-muted">${esc(e.category)||'General'}</span></td>
+        <td style="font-family:var(--font-mono);font-weight:600;color:var(--danger)">${fmtKsh(e.amount)}</td>
+        <td>${esc(e.paymentMethod)||'—'}</td>
+        <td style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">${esc(e.reference)||'—'}</td>
+        <td>
+          <button class="btn btn-xs btn-outline" onclick="window.biz.editExpense('${e.id}')"><i class="fa fa-edit"></i></button>
+          <button class="btn btn-xs btn-danger" onclick="window.biz.deleteRecord('expenses','${e.id}')"><i class="fa fa-trash"></i></button>
+        </td>
+      </tr>`).join('');
+  }
+
+  function openExpenseModal(id) {
+    editingId = id || null;
+    editingStore = 'expenses';
+    const e = id ? expenses.find(x=>x.id===id) : {};
+    const today = new Date().toISOString().split('T')[0];
+
+    ensureModal('expModal', `
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa fa-receipt" style="color:var(--danger)"></i> ${id ? 'Edit Expense' : 'Record Expense'}</div>
+        <button class="modal-close" onclick="bizCloseModal('expModal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row col2">
+          <div class="field"><label>Date *</label><input class="input" type="date" id="bf_date" value="${e?.date||today}"/></div>
+          <div class="field"><label>Amount (KSH) *</label><input class="input" type="number" id="bf_amount" value="${e?.amount||''}" placeholder="0" min="0" step="0.01"/></div>
+        </div>
+        <div class="field"><label>Description *</label><input class="input" id="bf_description" value="${esc(e?.description||'')}" placeholder="Rent, fuel, salary, maintenance..."/></div>
+        <div class="form-row col2">
+          <div class="field"><label>Category</label>
+            <select class="select" id="bf_category">
+              ${['Rent','Utilities','Fuel','Salary','Maintenance','Parts & Supplies','Marketing','Transport','Software','Other'].map(cat=>`<option value="${cat}" ${e?.category===cat?'selected':''}>${cat}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Payment Method</label>
+            <select class="select" id="bf_paymentMethod">
+              ${['Cash','M-PESA','Bank Transfer','Cheque','Card'].map(m=>`<option value="${m}" ${e?.paymentMethod===m?'selected':''}>${m}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="field"><label>Reference / Receipt #</label><input class="input" id="bf_reference" value="${esc(e?.reference||'')}" placeholder="REF-001 or receipt number"/></div>
+        <div class="field"><label>Notes</label><textarea class="input" id="bf_notes" rows="2">${esc(e?.notes||'')}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="bizCloseModal('expModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="window.biz.saveRecord('expenses')"><i class="fa fa-save"></i> Save Expense</button>
+      </div>`);
+    openModal('expModal');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // EMPLOYEES
+  // ═══════════════════════════════════════════════════════════════════
+  function renderEmployees() {
+    const search = (document.getElementById('empSearch')?.value || '').toLowerCase();
+    const filtered = employees.filter(e =>
+      !e._deleted &&
+      (e.name?.toLowerCase().includes(search) || e.role?.toLowerCase().includes(search))
+    );
+
+    const totalSalary = employees.filter(e=>!e._deleted).reduce((a,e)=>a+(Number(e.salary)||0),0);
+    renderKpiGrid('empKpiGrid', [
+      { label:'Total Employees', value: employees.filter(e=>!e._deleted).length, icon:'fa-id-badge', color:'var(--accent)', sub:'All staff' },
+      { label:'Active', value: employees.filter(e=>!e._deleted && e.status==='active').length, icon:'fa-user-check', color:'var(--success)', sub:'Currently working' },
+      { label:'Monthly Payroll', value: fmtKsh(totalSalary), icon:'fa-money-bill', color:'var(--gold)', sub:'Total salaries' }
+    ]);
+
+    const tbody = document.getElementById('empBody');
+    if (!tbody) return;
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-id-badge" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No employees found.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = filtered.map(e => `
+      <tr>
+        <td><strong>${esc(e.name)}</strong></td>
+        <td><span class="badge badge-muted">${esc(e.role)||'—'}</span></td>
+        <td>${esc(e.phone)||'—'}</td>
+        <td>${esc(e.email)||'—'}</td>
+        <td style="font-family:var(--font-mono);font-weight:600">${fmtKsh(e.salary)}</td>
+        <td style="font-family:var(--font-mono);font-size:12px">${esc(e.startDate)||'—'}</td>
+        <td><span class="badge ${e.status==='active'?'badge-success':'badge-muted'}">${esc(e.status||'active')}</span></td>
+        <td>
+          <button class="btn btn-xs btn-outline" onclick="window.biz.editEmployee('${e.id}')"><i class="fa fa-edit"></i></button>
+          <button class="btn btn-xs btn-danger" onclick="window.biz.deleteRecord('employees','${e.id}')"><i class="fa fa-trash"></i></button>
+        </td>
+      </tr>`).join('');
+  }
+
+  function openEmployeeModal(id) {
+    editingId = id || null;
+    editingStore = 'employees';
+    const e = id ? employees.find(x=>x.id===id) : {};
+    const today = new Date().toISOString().split('T')[0];
+
+    ensureModal('empModal', `
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa fa-id-badge" style="color:var(--accent)"></i> ${id ? 'Edit Employee' : 'Add Employee'}</div>
+        <button class="modal-close" onclick="bizCloseModal('empModal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row col2">
+          <div class="field"><label>Full Name *</label><input class="input" id="bf_name" value="${esc(e?.name||'')}" placeholder="Jane Doe"/></div>
+          <div class="field"><label>Role / Title *</label><input class="input" id="bf_role" value="${esc(e?.role||'')}" placeholder="Technician, Manager..."/></div>
+        </div>
+        <div class="form-row col2">
+          <div class="field"><label>Phone</label><input class="input" id="bf_phone" value="${esc(e?.phone||'')}" placeholder="+254 700 000000"/></div>
+          <div class="field"><label>Email</label><input class="input" type="email" id="bf_email" value="${esc(e?.email||'')}" placeholder="employee@printex.co.ke"/></div>
+        </div>
+        <div class="form-row col2">
+          <div class="field"><label>Monthly Salary (KSH)</label><input class="input" type="number" id="bf_salary" value="${e?.salary||''}" placeholder="0" min="0"/></div>
+          <div class="field"><label>Start Date</label><input class="input" type="date" id="bf_startDate" value="${e?.startDate||today}"/></div>
+        </div>
+        <div class="form-row col2">
+          <div class="field"><label>National ID</label><input class="input" id="bf_nationalId" value="${esc(e?.nationalId||'')}" placeholder="12345678"/></div>
+          <div class="field"><label>Status</label>
+            <select class="select" id="bf_status">
+              <option value="active" ${e?.status==='active'||!e?.status?'selected':''}>Active</option>
+              <option value="inactive" ${e?.status==='inactive'?'selected':''}>Inactive</option>
+              <option value="on-leave" ${e?.status==='on-leave'?'selected':''}>On Leave</option>
+            </select>
+          </div>
+        </div>
+        <div class="field"><label>Notes</label><textarea class="input" id="bf_notes" rows="2">${esc(e?.notes||'')}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="bizCloseModal('empModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="window.biz.saveRecord('employees')"><i class="fa fa-save"></i> Save Employee</button>
+      </div>`);
+    openModal('empModal');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // CATEGORIES
+  // ═══════════════════════════════════════════════════════════════════
+  function renderCategories() {
+    const search = (document.getElementById('catMgmtSearch')?.value || '').toLowerCase();
+    const filtered = categories.filter(c =>
+      !c._deleted &&
+      (c.name?.toLowerCase().includes(search) || c.description?.toLowerCase().includes(search))
+    );
+
+    const grid = document.getElementById('catMgmtGrid');
+    if (!grid) return;
+    if (!filtered.length) {
+      grid.innerHTML = `<div style="text-align:center;color:var(--dim);padding:40px;grid-column:1/-1"><i class="fa fa-tags" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No categories found.</div>`;
+      return;
+    }
+    grid.innerHTML = filtered.map(c => `
+      <div class="card" style="padding:16px;cursor:default">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:36px;height:36px;border-radius:10px;background:${c.color||'var(--accent-glow)'};border:1px solid ${c.color||'var(--border)'};display:flex;align-items:center;justify-content:center;font-size:18px">${c.icon||'🏷️'}</div>
+            <div>
+              <div style="font-weight:700;font-size:14px">${esc(c.name)}</div>
+              <div style="font-size:11px;color:var(--muted)">${c.partCount||0} parts</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-xs btn-outline" onclick="window.biz.editCategory('${c.id}')"><i class="fa fa-edit"></i></button>
+            <button class="btn btn-xs btn-danger" onclick="window.biz.deleteRecord('categories','${c.id}')"><i class="fa fa-trash"></i></button>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.5">${esc(c.description)||'No description'}</div>
+      </div>`).join('');
+  }
+
+  function openCategoryModal(id) {
+    editingId = id || null;
+    editingStore = 'categories';
+    const c = id ? categories.find(x=>x.id===id) : {};
+
+    ensureModal('catMgmtModal', `
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa fa-tags" style="color:var(--accent)"></i> ${id ? 'Edit Category' : 'Add Category'}</div>
+        <button class="modal-close" onclick="bizCloseModal('catMgmtModal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row col2">
+          <div class="field"><label>Category Name *</label><input class="input" id="bf_name" value="${esc(c?.name||'')}" placeholder="e.g. Bearings & Gears"/></div>
+          <div class="field"><label>Short Code</label><input class="input" id="bf_code" value="${esc(c?.code||'')}" placeholder="e.g. BRG" style="text-transform:uppercase"/></div>
+        </div>
+        <div class="form-row col2">
+          <div class="field"><label>Icon (emoji)</label><input class="input" id="bf_icon" value="${esc(c?.icon||'')}" placeholder="🔧" style="font-size:18px;text-align:center"/></div>
+          <div class="field"><label>Color</label><input class="input" type="color" id="bf_color" value="${c?.color||'#00d4ff'}" style="padding:4px;height:38px"/></div>
+        </div>
+        <div class="field"><label>Description</label><textarea class="input" id="bf_description" rows="3" placeholder="What parts belong in this category?">${esc(c?.description||'')}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="bizCloseModal('catMgmtModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="window.biz.saveRecord('categories')"><i class="fa fa-save"></i> Save Category</button>
+      </div>`);
+    openModal('catMgmtModal');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PURCHASES
+  // ═══════════════════════════════════════════════════════════════════
+  function renderPurchases() {
+    const search = (document.getElementById('purSearch')?.value || '').toLowerCase();
+    const filtered = purchases.filter(p =>
+      !p._deleted &&
+      (p.poNumber?.toLowerCase().includes(search) ||
+       p.supplier?.toLowerCase().includes(search))
+    );
+
+    const totalSpend = purchases.filter(p=>!p._deleted).reduce((a,p)=>a+(Number(p.total)||0),0);
+    renderKpiGrid('purKpiGrid', [
+      { label:'Purchase Orders', value: purchases.filter(p=>!p._deleted).length, icon:'fa-cart-plus', color:'var(--accent)', sub:'Total POs' },
+      { label:'Total Spend', value: fmtKsh(totalSpend), icon:'fa-money-bill', color:'var(--danger)', sub:'All purchases' },
+      { label:'Pending', value: purchases.filter(p=>!p._deleted && p.status==='pending').length, icon:'fa-clock', color:'var(--warn)', sub:'Awaiting delivery' }
+    ]);
+
+    const tbody = document.getElementById('purBody');
+    if (!tbody) return;
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-cart-plus" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No purchase orders found.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = filtered.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(p => {
+      const statusColor = p.status==='received'?'var(--success)':p.status==='cancelled'?'var(--danger)':'var(--warn)';
+      return `
+      <tr>
+        <td style="font-family:var(--font-mono);font-weight:600">${esc(p.poNumber)||'—'}</td>
+        <td style="font-family:var(--font-mono);font-size:12px">${esc(p.date)||'—'}</td>
+        <td>${esc(p.supplier)||'—'}</td>
+        <td>${(p.items||[]).length} item(s)</td>
+        <td style="font-family:var(--font-mono);font-weight:600;color:var(--accent)">${fmtKsh(p.total)}</td>
+        <td><span class="badge" style="background:${statusColor}1a;color:${statusColor};border:1px solid ${statusColor}">${esc(p.status||'pending')}</span></td>
+        <td>
+          <button class="btn btn-xs btn-outline" onclick="window.biz.editPurchase('${p.id}')"><i class="fa fa-edit"></i></button>
+          <button class="btn btn-xs btn-danger" onclick="window.biz.deleteRecord('purchases','${p.id}')"><i class="fa fa-trash"></i></button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  function openPurchaseModal(id) {
+    editingId = id || null;
+    editingStore = 'purchases';
+    const p = id ? purchases.find(x=>x.id===id) : {};
+    const today = new Date().toISOString().split('T')[0];
+    const supOptions = suppliers.filter(s=>!s._deleted).map(s=>`<option value="${esc(s.name)}" ${p?.supplier===s.name?'selected':''}>${esc(s.name)}</option>`).join('');
+
+    ensureModal('purModal', `
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa fa-cart-plus" style="color:var(--accent)"></i> ${id ? 'Edit Purchase Order' : 'New Purchase Order'}</div>
+        <button class="modal-close" onclick="bizCloseModal('purModal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row col2">
+          <div class="field"><label>PO Number</label><input class="input" id="bf_poNumber" value="${esc(p?.poNumber||'PO-'+Date.now().toString().slice(-6))}" style="font-family:var(--font-mono)"/></div>
+          <div class="field"><label>Date *</label><input class="input" type="date" id="bf_date" value="${p?.date||today}"/></div>
+        </div>
+        <div class="form-row col2">
+          <div class="field"><label>Supplier *</label>
+            <select class="select" id="bf_supplier">
+              <option value="">— Select supplier —</option>
+              ${supOptions}
+              <option value="__other__">Other (type manually)</option>
+            </select>
+          </div>
+          <div class="field"><label>Status</label>
+            <select class="select" id="bf_status">
+              <option value="pending" ${p?.status==='pending'||!p?.status?'selected':''}>Pending</option>
+              <option value="received" ${p?.status==='received'?'selected':''}>Received</option>
+              <option value="partial" ${p?.status==='partial'?'selected':''}>Partial</option>
+              <option value="cancelled" ${p?.status==='cancelled'?'selected':''}>Cancelled</option>
+            </select>
+          </div>
+        </div>
+        <div class="field"><label>Description / Items</label><textarea class="input" id="bf_description" rows="3" placeholder="List of items ordered...">${esc(p?.description||'')}</textarea></div>
+        <div class="form-row col2">
+          <div class="field"><label>Total Amount (KSH) *</label><input class="input" type="number" id="bf_total" value="${p?.total||''}" placeholder="0" min="0" step="0.01"/></div>
+          <div class="field"><label>Expected Delivery</label><input class="input" type="date" id="bf_expectedDate" value="${p?.expectedDate||''}"/></div>
+        </div>
+        <div class="field"><label>Notes</label><textarea class="input" id="bf_notes" rows="2">${esc(p?.notes||'')}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="bizCloseModal('purModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="window.biz.saveRecord('purchases')"><i class="fa fa-save"></i> Save Purchase Order</button>
+      </div>`);
+    openModal('purModal');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SAVE / DELETE GENERIC
+  // ═══════════════════════════════════════════════════════════════════
+  async function saveRecord(store) {
+    const record = gatherFields(store);
+    if (!record) return;
+
+    if (editingId) {
+      record.id = editingId;
+      const arr = getArr(store);
+      const idx = arr.findIndex(x=>x.id===editingId);
+      if (idx !== -1) arr[idx] = { ...arr[idx], ...record };
+      else arr.push(record);
+    } else {
+      getArr(store).push(record);
+    }
+
+    try {
+      await window.dbPut(store, record);
+      const modalId = { customers:'custModal', suppliers:'supModal', expenses:'expModal', employees:'empModal', categories:'catMgmtModal', purchases:'purModal' }[store];
+      closeModal(modalId);
+      refreshPage(store);
+      window.showToast && window.showToast('✅ Saved successfully!', 'success');
+      window.syncData && window.syncData();
+    } catch(e) {
+      console.error('[Business] Save failed:', e);
+      window.showToast && window.showToast('❌ Save failed: ' + e.message, 'danger');
+    }
+  }
+
+  async function deleteRecord(store, id) {
+    if (!confirm('Delete this record permanently?')) return;
+    const arr = getArr(store);
+    const item = arr.find(x=>x.id===id);
+    if (item) {
+      item._deleted = true;
+      try {
+        await window.dbPut(store, item);
+        refreshPage(store);
+        window.showToast && window.showToast('🗑️ Deleted.', 'success');
+        window.syncData && window.syncData();
+      } catch(e) {
+        window.showToast && window.showToast('❌ Delete failed.', 'danger');
+      }
+    }
+  }
+
+  // ── Field gathering per store ───────────────────────────────────────
+  function gatherFields(store) {
+    const g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const now = Date.now();
+
+    if (store === 'customers') {
+      const name = g('bf_name');
+      if (!name) { window.showToast && window.showToast('Name is required', 'warn'); return null; }
+      return { name, company: g('bf_company'), email: g('bf_email'), phone: g('bf_phone'), address: g('bf_address'), notes: g('bf_notes'), updatedAt: now };
+    }
+    if (store === 'suppliers') {
+      const name = g('bf_name');
+      if (!name) { window.showToast && window.showToast('Supplier name is required', 'warn'); return null; }
+      return { name, contact: g('bf_contact'), phone: g('bf_phone'), email: g('bf_email'), products: g('bf_products'), leadDays: Number(g('bf_leadDays'))||null, address: g('bf_address'), notes: g('bf_notes'), updatedAt: now };
+    }
+    if (store === 'expenses') {
+      const description = g('bf_description'); const amount = parseFloat(g('bf_amount'));
+      if (!description || isNaN(amount)) { window.showToast && window.showToast('Description and amount are required', 'warn'); return null; }
+      return { description, amount, date: g('bf_date'), category: g('bf_category'), paymentMethod: g('bf_paymentMethod'), reference: g('bf_reference'), notes: g('bf_notes'), updatedAt: now };
+    }
+    if (store === 'employees') {
+      const name = g('bf_name'); const role = g('bf_role');
+      if (!name) { window.showToast && window.showToast('Name is required', 'warn'); return null; }
+      return { name, role, phone: g('bf_phone'), email: g('bf_email'), salary: Number(g('bf_salary'))||0, startDate: g('bf_startDate'), nationalId: g('bf_nationalId'), status: g('bf_status')||'active', notes: g('bf_notes'), updatedAt: now };
+    }
+    if (store === 'categories') {
+      const name = g('bf_name');
+      if (!name) { window.showToast && window.showToast('Name is required', 'warn'); return null; }
+      return { name, code: g('bf_code').toUpperCase(), icon: g('bf_icon'), color: g('bf_color'), description: g('bf_description'), updatedAt: now };
+    }
+    if (store === 'purchases') {
+      const total = parseFloat(g('bf_total'));
+      if (isNaN(total)) { window.showToast && window.showToast('Amount is required', 'warn'); return null; }
+      const sup = g('bf_supplier');
+      return { poNumber: g('bf_poNumber'), date: g('bf_date'), supplier: sup === '__other__' ? '' : sup, status: g('bf_status')||'pending', description: g('bf_description'), total, expectedDate: g('bf_expectedDate'), notes: g('bf_notes'), updatedAt: now };
+    }
+    return null;
+  }
+
+  // ── Utilities ──────────────────────────────────────────────────────
+  function getArr(store) {
+    return store==='customers'?customers:store==='suppliers'?suppliers:store==='expenses'?expenses:store==='employees'?employees:store==='categories'?categories:purchases;
+  }
+
+  function refreshPage(store) {
+    const fn = { customers:renderCustomers, suppliers:renderSuppliers, expenses:renderExpenses, employees:renderEmployees, categories:renderCategories, purchases:renderPurchases }[store];
+    if (fn) fn();
+  }
+
+  function esc(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function ensureModal(id, html) {
+    let m = document.getElementById(id);
+    if (!m) {
+      m = document.createElement('div');
+      m.className = 'modal-overlay';
+      m.id = id;
+      m.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9000;align-items:center;justify-content:center;padding:20px';
+      m.innerHTML = `<div class="modal" style="max-width:580px;width:100%">${html}</div>`;
+      document.body.appendChild(m);
+    } else {
+      const inner = m.querySelector('.modal');
+      if (inner) inner.innerHTML = html;
+    }
+  }
+
+  function exportExpensesCSV() {
+    const rows = [['Date','Description','Category','Amount (KSH)','Payment Method','Reference']];
+    expenses.filter(e=>!e._deleted).forEach(e => {
+      rows.push([e.date||'',e.description||'',e.category||'',e.amount||0,e.paymentMethod||'',e.reference||'']);
+    });
+    const csv = rows.map(r => r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'printex-expenses.csv'; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // INIT + PUBLIC API
+  // ═══════════════════════════════════════════════════════════════════
+  async function init() {
+    await loadAll();
+  }
+
+  // Intercept page navigation to reload data
+  const origShowPage = window.showPage;
+  window.showPage = function(page, el) {
+    if (origShowPage) origShowPage(page, el);
+    const reloadMap = {
+      customers: () => { loadAll().then(renderCustomers); },
+      suppliers: () => { loadAll().then(renderSuppliers); },
+      expenses:  () => { loadAll().then(renderExpenses); },
+      employees: () => { loadAll().then(renderEmployees); },
+      categories:() => { loadAll().then(renderCategories); },
+      purchases: () => { loadAll().then(renderPurchases); }
+    };
+    if (reloadMap[page]) setTimeout(reloadMap[page], 50);
+  };
+
+  // Expose public API
+  window.biz = {
+    init,
+    // Customers
+    filterCustomers: renderCustomers,
+    openCustomerModal: () => openCustomerModal(),
+    editCustomer: id => openCustomerModal(id),
+    // Suppliers
+    filterSuppliers: renderSuppliers,
+    openSupplierModal: () => openSupplierModal(),
+    editSupplier: id => openSupplierModal(id),
+    // Expenses
+    filterExpenses: renderExpenses,
+    openExpenseModal: () => openExpenseModal(),
+    editExpense: id => openExpenseModal(id),
+    exportExpensesCSV,
+    // Employees
+    filterEmployees: renderEmployees,
+    openEmployeeModal: () => openEmployeeModal(),
+    editEmployee: id => openEmployeeModal(id),
+    // Categories
+    filterCategories: renderCategories,
+    openCategoryModal: () => openCategoryModal(),
+    editCategory: id => openCategoryModal(id),
+    // Purchases
+    filterPurchases: renderPurchases,
+    openPurchaseModal: () => openPurchaseModal(),
+    editPurchase: id => openPurchaseModal(id),
+    // Common
+    saveRecord,
+    deleteRecord
+  };
+
+  // Auto-init once DB is ready
+  const tryInit = () => {
+    if (window.db) {
+      init().then(() => console.log('[Business] Module ready.'));
+    } else {
+      setTimeout(tryInit, 200);
+    }
+  };
+  tryInit();
+
+})();

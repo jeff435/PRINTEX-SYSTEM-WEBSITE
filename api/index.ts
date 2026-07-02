@@ -75,15 +75,107 @@ const pool = process.env.DATABASE_URL
 if (pool) {
   (async () => {
     try {
-      await pool.query(
-        "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS delivery_status TEXT DEFAULT 'pending';"
-      );
-      await pool.query(
-        "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_rate REAL DEFAULT 0;"
-      );
-      await pool.query(
-        "ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at INTEGER DEFAULT 0;"
-      );
+      // Tables
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS categories (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          color TEXT DEFAULT '#00d4ff',
+          icon TEXT DEFAULT 'fa-tag',
+          parent_id TEXT,
+          created_at TEXT,
+          updated_at INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS customers (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          phone TEXT,
+          email TEXT,
+          address TEXT,
+          balance REAL DEFAULT 0,
+          notes TEXT,
+          created_at TEXT,
+          updated_at INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS suppliers (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          phone TEXT,
+          email TEXT,
+          address TEXT,
+          contact_person TEXT,
+          notes TEXT,
+          created_at TEXT,
+          updated_at INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS expenses (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          category TEXT,
+          description TEXT NOT NULL,
+          amount REAL DEFAULT 0,
+          date TEXT,
+          receipt_url TEXT,
+          notes TEXT,
+          created_at TEXT,
+          updated_at INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS employees (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          role TEXT DEFAULT 'employee',
+          phone TEXT,
+          email TEXT,
+          salary REAL DEFAULT 0,
+          hire_date TEXT,
+          status TEXT DEFAULT 'active',
+          notes TEXT,
+          created_at TEXT,
+          updated_at INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS purchases (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          supplier_id TEXT,
+          supplier_name TEXT,
+          items TEXT,
+          total REAL DEFAULT 0,
+          date TEXT,
+          status TEXT DEFAULT 'pending',
+          notes TEXT,
+          created_at TEXT,
+          updated_at INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS audit_logs (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          table_name TEXT,
+          record_id TEXT,
+          old_data TEXT,
+          new_data TEXT,
+          timestamp INTEGER DEFAULT 0
+        );
+      `);
+
+      // Alter columns safely
+      const addCol = async (sql: string) => pool.query(sql).catch(() => {});
+      await addCol("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS delivery_status TEXT DEFAULT 'pending';");
+      await addCol("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_rate REAL DEFAULT 0;");
+      await addCol("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_id TEXT;");
+      await addCol("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at INTEGER DEFAULT 0;");
+      await addCol("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS category_id TEXT;");
+      await addCol("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS reorder_level INTEGER DEFAULT 0;");
+      await addCol("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS buying_price REAL DEFAULT 0;");
+      await addCol("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS selling_price REAL DEFAULT 0;");
+      await addCol("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS barcode TEXT;");
+      await addCol("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS supplier_id TEXT;");
+      await addCol("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS expiry_date TEXT;");
+
       console.log("[DB] PostgreSQL startup migrations completed.");
     } catch (e) {
       console.error("[DB] PostgreSQL startup migration error:", e);
@@ -365,6 +457,298 @@ app.post("/api/auth/verify", authenticate, async (req, res) => {
   res.json({ valid: true, user });
 });
 
+// --- Category API ---
+app.get("/api/categories", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  try {
+    const result = await query("SELECT * FROM categories WHERE user_id = $1 ORDER BY name ASC", [userId]);
+    res.json(result.rows);
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to fetch categories: " + e.message });
+  }
+});
+
+app.post("/api/categories", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id, name, color, icon, parent_id } = req.body;
+  if (!name) return res.status(400).json({ error: "Category name is required" });
+  const catId = id || "cat_" + Math.random().toString(36).substring(2, 15);
+  const now = Date.now();
+  try {
+    await query(
+      `INSERT INTO categories (id, user_id, name, color, icon, parent_id, created_at, updated_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT(id) DO UPDATE SET name=$3, color=$4, icon=$5, parent_id=$6, updated_at=$8`,
+      [catId, userId, name, color || '#00d4ff', icon || 'fa-tag', parent_id || null, new Date().toISOString(), now]
+    );
+    res.json({ success: true, category: { id: catId, name, color, icon, parent_id } });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to create category: " + e.message });
+  }
+});
+
+app.put("/api/categories/:id", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id } = req.params;
+  const { name, color, icon, parent_id } = req.body;
+  const now = Date.now();
+  try {
+    await query(
+      "UPDATE categories SET name = $1, color = $2, icon = $3, parent_id = $4, updated_at = $5 WHERE id = $6 AND user_id = $7",
+      [name, color || '#00d4ff', icon || 'fa-tag', parent_id || null, now, id, userId]
+    );
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to update category: " + e.message });
+  }
+});
+
+app.delete("/api/categories/:id", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id } = req.params;
+  try {
+    await query("DELETE FROM categories WHERE id = $1 AND user_id = $2", [id, userId]);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to delete category: " + e.message });
+  }
+});
+
+app.post("/api/categories/merge", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { sourceId, targetId } = req.body;
+  if (!sourceId || !targetId) return res.status(400).json({ error: "Source and target categories are required" });
+  try {
+    const srcRes = await query("SELECT name FROM categories WHERE id = $1 AND user_id = $2", [sourceId, userId]);
+    const tgtRes = await query("SELECT name FROM categories WHERE id = $1 AND user_id = $2", [targetId, userId]);
+    if (srcRes.rows.length === 0 || tgtRes.rows.length === 0) {
+      return res.status(400).json({ error: "Invalid source or target category" });
+    }
+    const sourceName = srcRes.rows[0].name;
+    const targetName = tgtRes.rows[0].name;
+    const now = Date.now();
+
+    await query(
+      "UPDATE inventory SET category_id = $1, category = $2, updated_at = $3 WHERE category_id = $4 AND user_id = $5",
+      [targetId, targetName, now, sourceId, userId]
+    );
+    await query(
+      "UPDATE inventory SET category_id = $1, category = $2, updated_at = $3 WHERE category = $4 AND user_id = $5",
+      [targetId, targetName, now, sourceName, userId]
+    );
+
+    await query("DELETE FROM categories WHERE id = $1 AND user_id = $2", [sourceId, userId]);
+    res.json({ success: true, message: `Merged ${sourceName} into ${targetName}` });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to merge categories: " + e.message });
+  }
+});
+
+// --- Customer API ---
+app.get("/api/customers", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  try {
+    const result = await query("SELECT * FROM customers WHERE user_id = $1 ORDER BY name ASC", [userId]);
+    res.json(result.rows);
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to fetch customers: " + e.message });
+  }
+});
+
+app.post("/api/customers", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id, name, phone, email, address, balance, notes } = req.body;
+  if (!name) return res.status(400).json({ error: "Customer name is required" });
+  const custId = id || "cust_" + Math.random().toString(36).substring(2, 15);
+  const now = Date.now();
+  try {
+    await query(
+      `INSERT INTO customers (id, user_id, name, phone, email, address, balance, notes, created_at, updated_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT(id) DO UPDATE SET name=$3, phone=$4, email=$5, address=$6, balance=$7, notes=$8, updated_at=$10`,
+      [custId, userId, name, phone || '', email || '', address || '', parseFloat(balance) || 0, notes || '', new Date().toISOString(), now]
+    );
+    res.json({ success: true, customer: { id: custId, name, phone, email, address, balance, notes } });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to save customer: " + e.message });
+  }
+});
+
+app.delete("/api/customers/:id", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id } = req.params;
+  try {
+    await query("DELETE FROM customers WHERE id = $1 AND user_id = $2", [id, userId]);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to delete customer: " + e.message });
+  }
+});
+
+// --- Supplier API ---
+app.get("/api/suppliers", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  try {
+    const result = await query("SELECT * FROM suppliers WHERE user_id = $1 ORDER BY name ASC", [userId]);
+    res.json(result.rows);
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to fetch suppliers: " + e.message });
+  }
+});
+
+app.post("/api/suppliers", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id, name, phone, email, address, contact_person, notes } = req.body;
+  if (!name) return res.status(400).json({ error: "Supplier name is required" });
+  const suppId = id || "supp_" + Math.random().toString(36).substring(2, 15);
+  const now = Date.now();
+  try {
+    await query(
+      `INSERT INTO suppliers (id, user_id, name, phone, email, address, contact_person, notes, created_at, updated_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT(id) DO UPDATE SET name=$3, phone=$4, email=$5, address=$6, contact_person=$7, notes=$8, updated_at=$10`,
+      [suppId, userId, name, phone || '', email || '', address || '', contact_person || '', notes || '', new Date().toISOString(), now]
+    );
+    res.json({ success: true, supplier: { id: suppId, name, phone, email, address, contact_person, notes } });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to save supplier: " + e.message });
+  }
+});
+
+app.delete("/api/suppliers/:id", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id } = req.params;
+  try {
+    await query("DELETE FROM suppliers WHERE id = $1 AND user_id = $2", [id, userId]);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to delete supplier: " + e.message });
+  }
+});
+
+// --- Expenses API ---
+app.get("/api/expenses", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  try {
+    const result = await query("SELECT * FROM expenses WHERE user_id = $1 ORDER BY date DESC", [userId]);
+    res.json(result.rows);
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to fetch expenses: " + e.message });
+  }
+});
+
+app.post("/api/expenses", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id, category, description, amount, date, receipt_url, notes } = req.body;
+  if (!description || !amount) return res.status(400).json({ error: "Description and amount are required" });
+  const expId = id || "exp_" + Math.random().toString(36).substring(2, 15);
+  const now = Date.now();
+  try {
+    await query(
+      `INSERT INTO expenses (id, user_id, category, description, amount, date, receipt_url, notes, created_at, updated_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT(id) DO UPDATE SET category=$3, description=$4, amount=$5, date=$6, receipt_url=$7, notes=$8, updated_at=$10`,
+      [expId, userId, category || 'General', description, parseFloat(amount) || 0, date || new Date().toISOString().split('T')[0], receipt_url || '', notes || '', new Date().toISOString(), now]
+    );
+    res.json({ success: true, expense: { id: expId, category, description, amount, date, receipt_url, notes } });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to save expense: " + e.message });
+  }
+});
+
+app.delete("/api/expenses/:id", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id } = req.params;
+  try {
+    await query("DELETE FROM expenses WHERE id = $1 AND user_id = $2", [id, userId]);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to delete expense: " + e.message });
+  }
+});
+
+// --- Employees API ---
+app.get("/api/employees", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  try {
+    const result = await query("SELECT * FROM employees WHERE user_id = $1 ORDER BY name ASC", [userId]);
+    res.json(result.rows);
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to fetch employees: " + e.message });
+  }
+});
+
+app.post("/api/employees", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id, name, role, phone, email, salary, hire_date, status, notes } = req.body;
+  if (!name) return res.status(400).json({ error: "Employee name is required" });
+  const empId = id || "emp_" + Math.random().toString(36).substring(2, 15);
+  const now = Date.now();
+  try {
+    await query(
+      `INSERT INTO employees (id, user_id, name, role, phone, email, salary, hire_date, status, notes, created_at, updated_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       ON CONFLICT(id) DO UPDATE SET name=$3, role=$4, phone=$5, email=$6, salary=$7, hire_date=$8, status=$9, notes=$10, updated_at=$12`,
+      [empId, userId, name, role || 'employee', phone || '', email || '', parseFloat(salary) || 0, hire_date || '', status || 'active', notes || '', new Date().toISOString(), now]
+    );
+    res.json({ success: true, employee: { id: empId, name, role, phone, email, salary, hire_date, status, notes } });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to save employee: " + e.message });
+  }
+});
+
+app.delete("/api/employees/:id", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id } = req.params;
+  try {
+    await query("DELETE FROM employees WHERE id = $1 AND user_id = $2", [id, userId]);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to delete employee: " + e.message });
+  }
+});
+
+// --- Purchases API ---
+app.get("/api/purchases", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  try {
+    const result = await query("SELECT * FROM purchases WHERE user_id = $1 ORDER BY date DESC", [userId]);
+    res.json(result.rows);
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to fetch purchases: " + e.message });
+  }
+});
+
+app.post("/api/purchases", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id, supplier_id, supplier_name, items, total, date, status, notes } = req.body;
+  const purId = id || "pur_" + Math.random().toString(36).substring(2, 15);
+  const now = Date.now();
+  const itemsStr = typeof items === 'string' ? items : JSON.stringify(items || []);
+  try {
+    await query(
+      `INSERT INTO purchases (id, user_id, supplier_id, supplier_name, items, total, date, status, notes, created_at, updated_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT(id) DO UPDATE SET supplier_id=$3, supplier_name=$4, items=$5, total=$6, date=$7, status=$8, notes=$9, updated_at=$11`,
+      [purId, userId, supplier_id || '', supplier_name || '', itemsStr, parseFloat(total) || 0, date || new Date().toISOString().split('T')[0], status || 'pending', notes || '', new Date().toISOString(), now]
+    );
+    res.json({ success: true, purchase: { id: purId, supplier_id, supplier_name, total, date, status } });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to save purchase order: " + e.message });
+  }
+});
+
+app.delete("/api/purchases/:id", authenticate, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { id } = req.params;
+  try {
+    await query("DELETE FROM purchases WHERE id = $1 AND user_id = $2", [id, userId]);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to delete purchase order: " + e.message });
+  }
+});
+
 // ─── M-Pesa STK Push ──────────────────────────────────────────────
 app.post("/api/mpesa/stk-push", async (req, res) => {
   const { phoneNumber, amount, invoiceId } = req.body;
@@ -514,7 +898,10 @@ app.get("/api/inventory", authenticate, async (req, res) => {
 // ─── Sync Push API ────────────────────────────────────────────────
 app.post("/api/sync/push", authenticate, async (req, res) => {
   const userId = (req as any).user.id;
-  const { parts, invoices, settings, activity, submissions } = req.body;
+  const { 
+    parts, invoices, settings, activity, submissions,
+    categories, customers, suppliers, expenses, employees, purchases 
+  } = req.body;
   const now = Date.now();
   console.log(`[Sync Push] user=${userId} parts=${parts?.length || 0} invoices=${invoices?.length || 0} submissions=${submissions?.length || 0}`);
 
@@ -523,11 +910,16 @@ app.post("/api/sync/push", authenticate, async (req, res) => {
     if (parts && Array.isArray(parts)) {
       for (const p of parts) {
         const price = parseFloat(p.priceKsh || p.price) || 0;
+        const buyPrice = parseFloat(p.buying_price || p.buyingPrice) || 0;
+        const sellPrice = parseFloat(p.selling_price || p.sellingPrice) || 0;
+        const minSt = parseInt(p.minStock || p.min_stock) || 0;
+        const reorderLvl = parseInt(p.reorderLevel || p.reorder_level) || 0;
+        const st = parseInt(p.stock) || 0;
         await query(
-          `INSERT INTO inventory (id, user_id, category, part_num, description, stock, min_stock, price, supplier, location, image, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-           ON CONFLICT(id) DO UPDATE SET category=$3, part_num=$4, description=$5, stock=$6, min_stock=$7, price=$8, supplier=$9, location=$10, image=$11, updated_at=$12`,
-          [String(p.id), userId, p.category, p.partNum, p.desc, parseInt(p.stock) || 0, parseInt(p.minStock) || 0, price, p.supplier || "", p.location || "", p.image || null, now]
+          `INSERT INTO inventory (id, user_id, category, category_id, part_num, description, stock, min_stock, reorder_level, price, buying_price, selling_price, barcode, supplier, supplier_id, location, expiry_date, image, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+           ON CONFLICT(id) DO UPDATE SET category=$3, category_id=$4, part_num=$5, description=$6, stock=$7, min_stock=$8, reorder_level=$9, price=$10, buying_price=$11, selling_price=$12, barcode=$13, supplier=$14, supplier_id=$15, location=$16, expiry_date=$17, image=$18, updated_at=$19`,
+          [String(p.id), userId, p.category || "", p.category_id || p.categoryId || null, p.partNum || p.part_num || "", p.desc || p.description || "", st, minSt, reorderLvl, price, buyPrice, sellPrice, p.barcode || "", p.supplier || "", p.supplier_id || p.supplierId || "", p.location || "", p.expiry_date || p.expiryDate || "", p.image || null, now]
         );
       }
     }
@@ -537,10 +929,10 @@ app.post("/api/sync/push", authenticate, async (req, res) => {
       for (const inv of invoices) {
         const itemsStr = typeof inv.items === "string" ? inv.items : JSON.stringify(inv.items || []);
         await query(
-          `INSERT INTO invoices (id, user_id, invoice_number, date, customer, notes, type, items, subtotal, discount_pct, discount_amt, vat, vat_rate, grand, payment_status, payment_ref, paid_at, delivery_status, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-           ON CONFLICT(id) DO UPDATE SET invoice_number=$3, date=$4, customer=$5, notes=$6, type=$7, items=$8, subtotal=$9, discount_pct=$10, discount_amt=$11, vat=$12, vat_rate=$13, grand=$14, payment_status=$15, payment_ref=$16, paid_at=$17, delivery_status=$18, created_at=$19, updated_at=$20`,
-          [String(inv.id), userId, inv.invoiceNumber, inv.date, inv.customer, inv.notes || "", inv.type, itemsStr, inv.subtotal, inv.discountPct, inv.discountAmt, inv.vat, inv.vatRate || 0, inv.grand, inv.paymentStatus || "", inv.paymentRef || "", inv.paidAt || "", inv.deliveryStatus || "pending", inv.createdAt, now]
+          `INSERT INTO invoices (id, user_id, invoice_number, date, customer, customer_id, notes, type, items, subtotal, discount_pct, discount_amt, vat, vat_rate, grand, payment_status, payment_ref, paid_at, delivery_status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+           ON CONFLICT(id) DO UPDATE SET invoice_number=$3, date=$4, customer=$5, customer_id=$6, notes=$7, type=$8, items=$9, subtotal=$10, discount_pct=$11, discount_amt=$12, vat=$13, vat_rate=$14, grand=$15, payment_status=$16, payment_ref=$17, paid_at=$18, delivery_status=$19, created_at=$20, updated_at=$21`,
+          [String(inv.id), userId, inv.invoiceNumber || inv.invoice_number, inv.date, inv.customer, inv.customer_id || inv.customerId || null, inv.notes || "", inv.type, itemsStr, inv.subtotal, inv.discountPct || inv.discount_pct, inv.discountAmt || inv.discount_amt, inv.vat, inv.vatRate || inv.vat_rate, inv.grand, inv.paymentStatus || inv.payment_status || "", inv.paymentRef || inv.payment_ref || "", inv.paidAt || inv.paid_at || "", inv.deliveryStatus || inv.delivery_status || "pending", inv.createdAt || inv.created_at, now]
         );
         // Mirror to Firestore public_deliveries for real-time tracking
         if (inv.type === "invoice") {
@@ -615,6 +1007,79 @@ app.post("/api/sync/push", authenticate, async (req, res) => {
       }
     }
 
+    // 6. Sync Categories
+    if (categories && Array.isArray(categories)) {
+      for (const cat of categories) {
+        await query(
+          `INSERT INTO categories (id, user_id, name, color, icon, parent_id, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT(id) DO UPDATE SET name=$3, color=$4, icon=$5, parent_id=$6, updated_at=$8`,
+          [String(cat.id), userId, cat.name, cat.color || '#00d4ff', cat.icon || 'fa-tag', cat.parent_id || cat.parentId || null, cat.created_at || new Date().toISOString(), now]
+        );
+      }
+    }
+
+    // 7. Sync Customers
+    if (customers && Array.isArray(customers)) {
+      for (const cust of customers) {
+        await query(
+          `INSERT INTO customers (id, user_id, name, phone, email, address, balance, notes, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT(id) DO UPDATE SET name=$3, phone=$4, email=$5, address=$6, balance=$7, notes=$8, updated_at=$10`,
+          [String(cust.id), userId, cust.name, cust.phone || '', cust.email || '', cust.address || '', parseFloat(cust.balance) || 0, cust.notes || '', cust.created_at || new Date().toISOString(), now]
+        );
+      }
+    }
+
+    // 8. Sync Suppliers
+    if (suppliers && Array.isArray(suppliers)) {
+      for (const supp of suppliers) {
+        await query(
+          `INSERT INTO suppliers (id, user_id, name, phone, email, address, contact_person, notes, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT(id) DO UPDATE SET name=$3, phone=$4, email=$5, address=$6, contact_person=$7, notes=$8, updated_at=$10`,
+          [String(supp.id), userId, supp.name, supp.phone || '', supp.email || '', supp.address || '', supp.contact_person || supp.contactPerson || '', supp.notes || '', supp.created_at || new Date().toISOString(), now]
+        );
+      }
+    }
+
+    // 9. Sync Expenses
+    if (expenses && Array.isArray(expenses)) {
+      for (const exp of expenses) {
+        await query(
+          `INSERT INTO expenses (id, user_id, category, description, amount, date, receipt_url, notes, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT(id) DO UPDATE SET category=$3, description=$4, amount=$5, date=$6, receipt_url=$7, notes=$8, updated_at=$10`,
+          [String(exp.id), userId, exp.category || 'General', exp.description, parseFloat(exp.amount) || 0, exp.date || '', exp.receipt_url || exp.receiptUrl || '', exp.notes || '', exp.created_at || new Date().toISOString(), now]
+        );
+      }
+    }
+
+    // 10. Sync Employees
+    if (employees && Array.isArray(employees)) {
+      for (const emp of employees) {
+        await query(
+          `INSERT INTO employees (id, user_id, name, role, phone, email, salary, hire_date, status, notes, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           ON CONFLICT(id) DO UPDATE SET name=$3, role=$4, phone=$5, email=$6, salary=$7, hire_date=$8, status=$9, notes=$10, updated_at=$12`,
+          [String(emp.id), userId, emp.name, emp.role || 'employee', emp.phone || '', emp.email || '', parseFloat(emp.salary) || 0, emp.hire_date || emp.hireDate || '', emp.status || 'active', emp.notes || '', emp.created_at || new Date().toISOString(), now]
+        );
+      }
+    }
+
+    // 11. Sync Purchases
+    if (purchases && Array.isArray(purchases)) {
+      for (const pur of purchases) {
+        const itemsStr = typeof pur.items === 'string' ? pur.items : JSON.stringify(pur.items || []);
+        await query(
+          `INSERT INTO purchases (id, user_id, supplier_id, supplier_name, items, total, date, status, notes, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           ON CONFLICT(id) DO UPDATE SET supplier_id=$3, supplier_name=$4, items=$5, total=$6, date=$7, status=$8, notes=$9, updated_at=$11`,
+          [String(pur.id), userId, pur.supplier_id || pur.supplierId || '', pur.supplier_name || pur.supplierName || '', itemsStr, parseFloat(pur.total) || 0, pur.date || '', pur.status || 'pending', pur.notes || '', pur.created_at || new Date().toISOString(), now]
+        );
+      }
+    }
+
     console.log(`[Sync Push] Success for user=${userId} at ${now}`);
     res.json({ success: true, timestamp: now });
   } catch (e: any) {
@@ -643,16 +1108,36 @@ app.post("/api/sync/pull", authenticate, async (req, res) => {
       ? await query("SELECT * FROM submissions WHERE updated_at > $1", [lastSyncTimestamp])
       : await query("SELECT * FROM submissions WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
 
+    const categoriesResult = await query("SELECT * FROM categories WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
+    const customersResult = await query("SELECT * FROM customers WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
+    const suppliersResult = await query("SELECT * FROM suppliers WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
+    const expensesResult = await query("SELECT * FROM expenses WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
+    const employeesResult = await query("SELECT * FROM employees WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
+    const purchasesResult = await query("SELECT * FROM purchases WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
+
     res.json({
-      uidValidity: { parts: 20260608, invoices: 20260608, settings: 20260608, activity: 20260608, submissions: 20260608 },
+      uidValidity: {
+        parts: 20260608,
+        invoices: 20260608,
+        settings: 20260608,
+        activity: 20260608,
+        submissions: 20260608,
+        categories: 20260608,
+        customers: 20260608,
+        suppliers: 20260608,
+        expenses: 20260608,
+        employees: 20260608,
+        purchases: 20260608
+      },
       parts: partsResult.rows.map((r) => ({
-        id: r.id, category: r.category, partNum: r.part_num, desc: r.description,
-        stock: r.stock, minStock: r.min_stock, priceKsh: r.price,
-        supplier: r.supplier, location: r.location, image: r.image,
+        id: r.id, category: r.category, categoryId: r.category_id, partNum: r.part_num, desc: r.description,
+        stock: r.stock, minStock: r.min_stock, reorderLevel: r.reorder_level, priceKsh: r.price,
+        buyingPrice: r.buying_price, sellingPrice: r.selling_price, barcode: r.barcode,
+        supplier: r.supplier, supplierId: r.supplier_id, location: r.location, expiryDate: r.expiry_date, image: r.image,
       })),
       invoices: invoicesResult.rows.map((r) => ({
         id: r.id, userId: r.user_id, invoiceNumber: r.invoice_number, date: r.date,
-        customer: r.customer, notes: r.notes, type: r.type, items: r.items,
+        customer: r.customer, customerId: r.customer_id, notes: r.notes, type: r.type, items: r.items,
         subtotal: r.subtotal, discountPct: r.discount_pct, discountAmt: r.discount_amt,
         vat: r.vat, vatRate: r.vat_rate, grand: r.grand,
         paymentStatus: r.payment_status || "pending", paymentRef: r.payment_ref || "",
@@ -662,6 +1147,12 @@ app.post("/api/sync/pull", authenticate, async (req, res) => {
       settings: settingsResult.rows,
       activity: activityResult.rows,
       submissions: submissionsResult.rows,
+      categories: categoriesResult.rows,
+      customers: customersResult.rows,
+      suppliers: suppliersResult.rows,
+      expenses: expensesResult.rows,
+      employees: employeesResult.rows,
+      purchases: purchasesResult.rows
     });
   } catch (e: any) {
     console.error("[Sync Pull] Error:", e);
@@ -678,7 +1169,8 @@ app.post("/api/sync/delete", authenticate, async (req, res) => {
 
   try {
     const table = store === "parts" ? "inventory" : store;
-    if (!["inventory", "invoices", "settings", "activity", "submissions"].includes(table)) {
+    const allowedTables = ['inventory', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases'];
+    if (!allowedTables.includes(table)) {
       return res.status(400).json({ error: "Invalid store: " + store });
     }
 

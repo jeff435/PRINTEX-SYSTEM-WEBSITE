@@ -147,7 +147,7 @@ window.toggleSyncPanel = function(e) {
 window.updateSyncPanelUI = async function() {
   var lastSyncText = 'Never';
   var lastSyncTime = 0;
-  var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions'];
+  var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases'];
   var counts = {};
   
   for (var i = 0; i < stores.length; i++) {
@@ -220,7 +220,7 @@ window.syncData = async function() {
   window.updateSyncStatus('syncing');
 
   try {
-    var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions'];
+    var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases'];
     var currentSyncTime = Date.now();
 
     // 1. EXPUNGE (deleted items sync & hard delete)
@@ -268,8 +268,22 @@ window.syncData = async function() {
     var localSettings = await window.dbGet('settings') || [];
     var unsyncedSettings = localSettings.filter(function(s) { return !s._synced && !s._deleted; });
 
-    if (unsyncedParts.length || unsyncedInvoices.length || unsyncedSubmissions.length || unsyncedActivity.length || unsyncedSettings.length) {
-      console.log('[Sync] Pushing unsynced items: parts=' + unsyncedParts.length + ', invoices=' + unsyncedInvoices.length + ', submissions=' + unsyncedSubmissions.length);
+    var localCategories = await window.dbGet('categories') || [];
+    var unsyncedCategories = localCategories.filter(function(x) { return !x._synced && !x._deleted; });
+    var localCustomers = await window.dbGet('customers') || [];
+    var unsyncedCustomers = localCustomers.filter(function(x) { return !x._synced && !x._deleted; });
+    var localSuppliers = await window.dbGet('suppliers') || [];
+    var unsyncedSuppliers = localSuppliers.filter(function(x) { return !x._synced && !x._deleted; });
+    var localExpenses = await window.dbGet('expenses') || [];
+    var unsyncedExpenses = localExpenses.filter(function(x) { return !x._synced && !x._deleted; });
+    var localEmployees = await window.dbGet('employees') || [];
+    var unsyncedEmployees = localEmployees.filter(function(x) { return !x._synced && !x._deleted; });
+    var localPurchases = await window.dbGet('purchases') || [];
+    var unsyncedPurchases = localPurchases.filter(function(x) { return !x._synced && !x._deleted; });
+
+    var totalUnsynced = unsyncedParts.length + unsyncedInvoices.length + unsyncedSubmissions.length + unsyncedActivity.length + unsyncedSettings.length + unsyncedCategories.length + unsyncedCustomers.length + unsyncedSuppliers.length + unsyncedExpenses.length + unsyncedEmployees.length + unsyncedPurchases.length;
+    if (totalUnsynced > 0) {
+      console.log('[Sync] Pushing ' + totalUnsynced + ' unsynced items across all stores.');
       var pushRes = await authenticatedFetch('/api/sync/push', {
         method: 'POST',
         body: JSON.stringify({
@@ -277,27 +291,35 @@ window.syncData = async function() {
           invoices: unsyncedInvoices,
           submissions: unsyncedSubmissions,
           activity: unsyncedActivity,
-          settings: unsyncedSettings
+          settings: unsyncedSettings,
+          categories: unsyncedCategories,
+          customers: unsyncedCustomers,
+          suppliers: unsyncedSuppliers,
+          expenses: unsyncedExpenses,
+          employees: unsyncedEmployees,
+          purchases: unsyncedPurchases
         })
       });
 
       if (!pushRes.ok) throw new Error('Push failed: ' + pushRes.status);
 
-      for (var i = 0; i < unsyncedParts.length; i++) {
-        var p = unsyncedParts[i]; p._synced = true; await window.dbPutNoSync('parts', p);
-      }
-      for (var i = 0; i < unsyncedInvoices.length; i++) {
-        var inv = unsyncedInvoices[i]; inv._synced = true; await window.dbPutNoSync('invoices', inv);
-      }
-      for (var i = 0; i < unsyncedSubmissions.length; i++) {
-        var sub = unsyncedSubmissions[i]; sub._synced = true; await window.dbPutNoSync('submissions', sub);
-      }
-      for (var i = 0; i < unsyncedActivity.length; i++) {
-        var act = unsyncedActivity[i]; act._synced = true; await window.dbPutNoSync('activity', act);
-      }
-      for (var i = 0; i < unsyncedSettings.length; i++) {
-        var s = unsyncedSettings[i]; s._synced = true; await window.dbPutNoSync('settings', s);
-      }
+      var markSynced = async function(storeN, arr) {
+        for (var i = 0; i < arr.length; i++) {
+          arr[i]._synced = true;
+          await window.dbPutNoSync(storeN, arr[i]);
+        }
+      };
+      await markSynced('parts', unsyncedParts);
+      await markSynced('invoices', unsyncedInvoices);
+      await markSynced('submissions', unsyncedSubmissions);
+      await markSynced('activity', unsyncedActivity);
+      await markSynced('settings', unsyncedSettings);
+      await markSynced('categories', unsyncedCategories);
+      await markSynced('customers', unsyncedCustomers);
+      await markSynced('suppliers', unsyncedSuppliers);
+      await markSynced('expenses', unsyncedExpenses);
+      await markSynced('employees', unsyncedEmployees);
+      await markSynced('purchases', unsyncedPurchases);
     }
 
     // 3. PULL (Delta pull with UIDVALIDITY checks)
@@ -403,6 +425,22 @@ window.syncData = async function() {
         ssub._deleted = ssub._deleted || false;
         if (await resolveConflictAndSave('submissions', ssub)) {
           hasNewData = true;
+        }
+      }
+    }
+
+    // Pull new business stores (categories, customers, suppliers, expenses, employees, purchases)
+    var newStores = ['categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases'];
+    for (var ns = 0; ns < newStores.length; ns++) {
+      var nsName = newStores[ns];
+      if (serverData[nsName] && serverData[nsName].length) {
+        for (var ni = 0; ni < serverData[nsName].length; ni++) {
+          var nsItem = serverData[nsName][ni];
+          nsItem._synced = true;
+          nsItem._deleted = nsItem._deleted || false;
+          if (await resolveConflictAndSave(nsName, nsItem)) {
+            hasNewData = true;
+          }
         }
       }
     }

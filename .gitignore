@@ -1,11 +1,19 @@
 node_modules/
 build/
 dist/
+release/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+
+# Electron build
+release/
+out/
+
+# Local database (user data — never commit)
+*.db
 
 # InsForge & AI agent skills
 .insforge

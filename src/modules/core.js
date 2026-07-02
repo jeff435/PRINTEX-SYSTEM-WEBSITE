@@ -68,13 +68,21 @@ window.trendChart = null;
 window.currentTheme = 'dark';
 window.currentUser = null;
 
+// New business variables
+window.categories = [];
+window.customers = [];
+window.suppliers = [];
+window.expenses = [];
+window.employees = [];
+window.purchases = [];
+
 window.db = null;
 window.tabSessionId = 'tab_' + Math.random().toString(36).substring(2, 9);
 
 // ── INDEXEDDB SETUP ──────────────────────────────────────────────
 window.openDB = function() {
   return new Promise((res, rej) => {
-    const req = indexedDB.open('PrintexDB', 4);
+    const req = indexedDB.open('PrintexDB', 5);
     req.onupgradeneeded = e => {
       const d = e.target.result;
       if (!d.objectStoreNames.contains('parts')) d.createObjectStore('parts', {keyPath:'id'});
@@ -82,6 +90,13 @@ window.openDB = function() {
       if (!d.objectStoreNames.contains('submissions')) d.createObjectStore('submissions', {keyPath:'id'});
       if (!d.objectStoreNames.contains('settings')) d.createObjectStore('settings', {keyPath:'key'});
       if (!d.objectStoreNames.contains('activity')) d.createObjectStore('activity', {keyPath:'id'});
+      // v5: New business stores
+      if (!d.objectStoreNames.contains('categories')) d.createObjectStore('categories', {keyPath:'id'});
+      if (!d.objectStoreNames.contains('customers')) d.createObjectStore('customers', {keyPath:'id'});
+      if (!d.objectStoreNames.contains('suppliers')) d.createObjectStore('suppliers', {keyPath:'id'});
+      if (!d.objectStoreNames.contains('expenses')) d.createObjectStore('expenses', {keyPath:'id'});
+      if (!d.objectStoreNames.contains('employees')) d.createObjectStore('employees', {keyPath:'id'});
+      if (!d.objectStoreNames.contains('purchases')) d.createObjectStore('purchases', {keyPath:'id'});
     };
     req.onsuccess = e => { window.db = e.target.result; res(window.db); };
     req.onerror = () => rej(req.error);
@@ -212,6 +227,24 @@ window.dbPut = function(store, value) {
     else value.id = String(value.id);
   } else if (store === 'settings') {
     if (!value.key) value.key = String(value.id);
+  } else if (store === 'categories') {
+    if (!value.id) value.id = 'cat_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+    else value.id = String(value.id);
+  } else if (store === 'customers') {
+    if (!value.id) value.id = 'cust_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+    else value.id = String(value.id);
+  } else if (store === 'suppliers') {
+    if (!value.id) value.id = 'sup_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+    else value.id = String(value.id);
+  } else if (store === 'expenses') {
+    if (!value.id) value.id = 'exp_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+    else value.id = String(value.id);
+  } else if (store === 'employees') {
+    if (!value.id) value.id = 'emp_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+    else value.id = String(value.id);
+  } else if (store === 'purchases') {
+    if (!value.id) value.id = 'pur_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+    else value.id = String(value.id);
   }
 
   // IMAP-style flags

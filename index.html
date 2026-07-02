@@ -1065,6 +1065,23 @@ input[title]:hover::before,select[title]:hover::before{display:none}
   border-color: rgba(0,102,204,0.2) !important;
   box-shadow: 0 20px 50px rgba(0,0,0,0.2), 0 0 20px rgba(0,102,204,0.1) !important;
 }
+
+/* ── BADGE UTILITIES (used by business pages) ── */
+.badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
+  font-family: var(--font-mono); background: var(--surface); border: 1px solid var(--border);
+  color: var(--text);
+}
+.badge-success { background: var(--success-dim); border-color: var(--success); color: var(--success); }
+.badge-warn    { background: var(--warn-dim);    border-color: var(--warn);    color: var(--warn); }
+.badge-danger  { background: var(--danger-dim);  border-color: var(--danger);  color: var(--danger); }
+.badge-muted   { background: var(--bg3);         border-color: var(--border);  color: var(--muted); }
+
+/* ── SIDEBAR SCROLL for expanded nav ── */
+#sidebar { overflow-y: auto; overflow-x: hidden; }
+#sidebar::-webkit-scrollbar { width: 3px; }
+#sidebar::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 </style>
 </head>
 <body>
@@ -1236,6 +1253,13 @@ input[title]:hover::before,select[title]:hover::before{display:none}
   <div class="nav-item" onclick="showPage('createInvoice',this)"><i class="fa fa-plus-circle"></i> New Invoice / Quote</div>
   <div class="nav-item" onclick="showPage('services',this)"><i class="fa fa-screwdriver-wrench"></i> Services</div>
   <div class="nav-item" onclick="showPage('freelance',this)"><i class="fa fa-truck"></i> Deliveries & Riders</div>
+  <div class="nav-section">Records</div>
+  <div class="nav-item" onclick="showPage('customers',this)"><i class="fa fa-users"></i> Customers</div>
+  <div class="nav-item" onclick="showPage('suppliers',this)"><i class="fa fa-industry"></i> Suppliers</div>
+  <div class="nav-item" onclick="showPage('expenses',this)"><i class="fa fa-receipt"></i> Expenses</div>
+  <div class="nav-item" onclick="showPage('purchases',this)"><i class="fa fa-cart-plus"></i> Purchases</div>
+  <div class="nav-item" onclick="showPage('employees',this)"><i class="fa fa-id-badge"></i> Employees</div>
+  <div class="nav-item" onclick="showPage('categories',this)"><i class="fa fa-tags"></i> Categories</div>
   <div class="nav-section">Tools</div>
   <div class="nav-item" onclick="showPage('reports',this)"><i class="fa fa-chart-bar"></i> Reports</div>
   <div class="nav-item" onclick="showPage('analytics',this)"><i class="fa fa-building"></i> Company Analytics</div>
@@ -2044,6 +2068,7 @@ input[title]:hover::before,select[title]:hover::before{display:none}
 <script type="module" src="/src/modules/freelance.js"></script>
 <script type="module" src="/src/modules/services.js"></script>
 <script type="module" src="/src/modules/sync.js"></script>
+<script type="module" src="/src/modules/business.js"></script>
 <script type="module" src="/src/modules/delivery.js"></script>
 <script type="module">
   window.addEventListener('DOMContentLoaded', () => {
