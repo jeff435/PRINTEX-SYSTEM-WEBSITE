@@ -336,6 +336,10 @@ async function startServer() {
     });
   });
 
+  app.get("/api/status", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
   // Sync Status — diagnostic endpoint (no auth required)
   app.get("/api/sync/status", async (req, res) => {
     let firebaseStatus = "not_initialized";
