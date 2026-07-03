@@ -18,6 +18,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
+    <!-- SheetJS Excel Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
@@ -1344,16 +1346,6 @@ input[title]:hover::before,select[title]:hover::before{display:none}
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="invSearch" placeholder="Search parts, SKU, supplier..." oninput="filterInventory()"/></div>
         <select class="select" style="width:auto" id="catFilter" onchange="filterInventory()">
           <option value="">All Categories</option>
-          <option value="A">A – Valves & Pneumatic Parts</option>
-          <option value="B">B – Bellows & Autoplate Parts</option>
-          <option value="C">C – Bearings & Gears</option>
-          <option value="D">D – Cam Followers</option>
-          <option value="E">E – Grippers & Separators</option>
-          <option value="G">G – Sensors & Electronics</option>
-          <option value="K">K – Cylinders</option>
-          <option value="J">J – Motors & Belts</option>
-          <option value="F">F – Heidelberg Parts</option>
-          <option value="L">L – Consumables</option>
         </select>
         <select class="select" style="width:auto" id="statusFilter" onchange="filterInventory()">
           <option value="">All Status</option>
@@ -1474,16 +1466,16 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="kpi-grid" id="reportKpis" style="grid-template-columns:repeat(3,1fr)"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px">
         <div class="card">
-          <div class="card-header"><div class="card-title">Out of Stock Parts</div><button class="btn btn-outline btn-xs" onclick="exportReportCSV('out')"><i class="fa fa-download"></i> CSV</button></div>
+          <div class="card-header"><div class="card-title">Out of Stock Parts</div><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="exportReportCSV('out')"><i class="fa fa-download"></i> CSV</button><button class="btn btn-success btn-xs" onclick="exportReportExcel('out')"><i class="fa fa-file-excel"></i> Excel</button></div></div>
           <div class="table-wrap"><table id="outStockTable"><thead><tr><th>SKU</th><th>Description</th><th>Min Stock</th><th>Supplier</th></tr></thead><tbody id="outStockBody"></tbody></table></div>
         </div>
         <div class="card">
-          <div class="card-header"><div class="card-title">Low Stock Parts</div><button class="btn btn-outline btn-xs" onclick="exportReportCSV('low')"><i class="fa fa-download"></i> CSV</button></div>
+          <div class="card-header"><div class="card-title">Low Stock Parts</div><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="exportReportCSV('low')"><i class="fa fa-download"></i> CSV</button><button class="btn btn-success btn-xs" onclick="exportReportExcel('low')"><i class="fa fa-file-excel"></i> Excel</button></div></div>
           <div class="table-wrap"><table id="lowStockTable"><thead><tr><th>SKU</th><th>Description</th><th>Stock</th><th>Min</th></tr></thead><tbody id="lowStockBody"></tbody></table></div>
         </div>
       </div>
       <div class="card" style="margin-top:16px">
-        <div class="card-header"><div class="card-title">Invoice / Sales Summary</div><button class="btn btn-outline btn-xs" onclick="exportReportCSV('sales')"><i class="fa fa-download"></i> CSV</button></div>
+        <div class="card-header"><div class="card-title">Invoice / Sales Summary</div><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="exportReportCSV('sales')"><i class="fa fa-download"></i> CSV</button><button class="btn btn-success btn-xs" onclick="exportReportExcel('sales')"><i class="fa fa-file-excel"></i> Excel</button></div></div>
         <div id="salesSummary" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:4px"></div>
       </div>
     </div>
@@ -1823,6 +1815,7 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="custSearch" placeholder="Search customers..." oninput="window.biz && window.biz.filterCustomers()"/></div>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openCustomerModal()"><i class="fa fa-plus"></i> Add Customer</button>
+        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportCustomersExcel()"><i class="fa fa-file-excel"></i> Excel</button>
         <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterCustomers()"><i class="fa fa-sync"></i> Refresh</button>
       </div>
       <div class="table-wrap">
@@ -1843,6 +1836,7 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="supSearch" placeholder="Search suppliers..." oninput="window.biz && window.biz.filterSuppliers()"/></div>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openSupplierModal()"><i class="fa fa-plus"></i> Add Supplier</button>
+        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportSuppliersExcel()"><i class="fa fa-file-excel"></i> Excel</button>
         <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterSuppliers()"><i class="fa fa-sync"></i> Refresh</button>
       </div>
       <div class="table-wrap">
@@ -1866,7 +1860,8 @@ input[title]:hover::before,select[title]:hover::before{display:none}
           <option value="">All Months</option>
         </select>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openExpenseModal()"><i class="fa fa-plus"></i> Record Expense</button>
-        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.exportExpensesCSV()"><i class="fa fa-file-csv"></i> Export CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.exportExpensesCSV()"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportExpensesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -1886,6 +1881,7 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="purSearch" placeholder="Search purchase orders..." oninput="window.biz && window.biz.filterPurchases()"/></div>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openPurchaseModal()"><i class="fa fa-plus"></i> New Purchase Order</button>
+        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportPurchasesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
         <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterPurchases()"><i class="fa fa-sync"></i> Refresh</button>
       </div>
       <div class="table-wrap">
@@ -1906,6 +1902,7 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="empSearch" placeholder="Search employees..." oninput="window.biz && window.biz.filterEmployees()"/></div>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openEmployeeModal()"><i class="fa fa-plus"></i> Add Employee</button>
+        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportEmployeesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
         <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterEmployees()"><i class="fa fa-sync"></i> Refresh</button>
       </div>
       <div class="table-wrap">
@@ -2107,16 +2104,7 @@ input[title]:hover::before,select[title]:hover::before{display:none}
         <div class="field"><label>Part Number (SKU) *</label><input class="input" id="fPartNum" placeholder="e.g. M2.184.1111"/></div>
         <div class="field"><label>Category *</label>
           <select class="select" id="fCat">
-            <option value="A">A – Valves & Pneumatic Parts</option>
-            <option value="B">B – Bellows & Autoplate Parts</option>
-            <option value="C">C – Bearings & Gears</option>
-            <option value="D">D – Cam Followers</option>
-            <option value="E">E – Grippers & Separators</option>
-            <option value="F">F – Heidelberg Parts</option>
-            <option value="G">G – Sensors & Electronics</option>
-            <option value="J">J – Motors & Belts</option>
-            <option value="K">K – Cylinders</option>
-            <option value="L">L – Consumables</option>
+            <option value="">No categories defined</option>
           </select>
         </div>
       </div>
@@ -2126,8 +2114,9 @@ input[title]:hover::before,select[title]:hover::before{display:none}
         <div class="field"><label>Min Stock</label><input class="input" type="number" id="fMinStock" value="1" min="0"/></div>
         <div class="field"><label>Supplier</label><input class="input" id="fSupplier" placeholder="Heidelberg"/></div>
       </div>
-      <div class="form-row col2">
-        <div class="field"><label>Cost Price (KSH)</label><input class="input" type="number" id="fPriceKsh" placeholder="0" min="0"/></div>
+      <div class="form-row col3">
+        <div class="field"><label>Buying Price (KSH)</label><input class="input" type="number" id="fBuyingPrice" placeholder="0" min="0"/></div>
+        <div class="field"><label>Selling Price (KSH) *</label><input class="input" type="number" id="fPriceKsh" placeholder="0" min="0"/></div>
         <div class="field"><label>Location</label><input class="input" id="fLocation" placeholder="Warehouse A1"/></div>
       </div>
       <div class="field"><label>Part Image</label>
@@ -2185,6 +2174,7 @@ input[title]:hover::before,select[title]:hover::before{display:none}
 <script type="module" src="/src/modules/sync.js"></script>
 <script type="module" src="/src/modules/business.js"></script>
 <script type="module" src="/src/modules/delivery.js"></script>
+<script type="module" src="/src/modules/spreadsheet.js"></script>
 <script type="module">
   window.addEventListener('DOMContentLoaded', () => {
     if (window.location.pathname.startsWith('/delivery/')) {

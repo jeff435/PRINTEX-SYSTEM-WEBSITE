@@ -225,8 +225,18 @@ window.retryMpesaPayment = function() {
 };
 
 window.markInvoicePaid = async function(invoiceId, mpesaRef) {
-  const inv = window.invoices.find(i => i.id === invoiceId);
+  const inv = window.invoices.find(i => i.id === invoiceId || String(i.id) === String(invoiceId));
   if (!inv) return;
+
+  if (inv.customerId && inv.paymentStatus !== 'paid') {
+    const cust = await window.dbGet('customers', inv.customerId);
+    if (cust) {
+      cust.balance = Math.max(0, (cust.balance || 0) - inv.grand);
+      await window.dbPut('customers', cust);
+      if (window.biz && typeof window.biz.init === 'function') await window.biz.init();
+    }
+  }
+
   inv.paymentStatus = 'paid';
   inv.paymentRef = mpesaRef;
   inv.paidAt = new Date().toISOString();

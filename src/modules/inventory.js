@@ -68,7 +68,9 @@ window.renderInventory = function(filtered) {
     return;
   }
 
-  body.innerHTML = list.map(p => {
+  const pagedList = window.paginateDataset('inventory', list, window.renderInventory);
+
+  body.innerHTML = pagedList.map(p => {
     const st = window.stockStatus(p);
     const pn = String(p.partNum || p.part_num || '—');
     const ds = String(p.desc || p.description || '—');
@@ -76,11 +78,16 @@ window.renderInventory = function(filtered) {
     const cat = p.category || 'G';
     const img = p.image || window.getCatImage(cat, p.id);
     const sid = String(p.id);
+    
+    const catObj = (window.categories || []).find(c => (c.code || c.name) === cat);
+    const catColor = catObj?.color || window.CAT_COLORS[cat] || '#888888';
+    const catStyle = `background:${catColor}26;color:${catColor};border:1px solid ${catColor}40;`;
+
     return `<tr>
       <td><img src="${img}" class="part-thumb" onerror="this.src='${window.getCatImage(cat,p.id)}'" loading="lazy"/></td>
       <td><div class="part-num">${window.esc(pn)}</div></td>
       <td><div class="part-desc">${window.esc(ds)}</div></td>
-      <td><span class="badge badge-cat-${cat}">${cat}</span></td>
+      <td><span class="badge" style="${catStyle}">${cat}</span></td>
       <td>
         <div class="stock-ctrl">
           <button class="stock-btn" onclick="adjustStock('${sid}',-1)" title="Reduce stock by 1">−</button>
@@ -144,8 +151,9 @@ window.openAddPart = function() {
   if (typeof window.populateCategorySelects === 'function') window.populateCategorySelects();
   document.getElementById('partModalTitle').textContent = 'Add New Part';
   document.getElementById('editPartId').value = '';
-  ['fPartNum','fDesc','fSupplier','fPriceKsh','fLocation'].forEach(id => {
-    document.getElementById(id).value = '';
+  ['fPartNum','fDesc','fSupplier','fPriceKsh','fLocation','fBuyingPrice'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
   });
   const fCat = document.getElementById('fCat');
   if (fCat && fCat.options.length > 0) fCat.selectedIndex = 0;
@@ -170,6 +178,8 @@ window.openEditPart = function(id) {
   document.getElementById('fMinStock').value = p.minStock || p.min_stock || 1;
   document.getElementById('fSupplier').value = p.supplier || '';
   document.getElementById('fPriceKsh').value = p.priceKsh || p.price_ksh || '';
+  const buyingPriceEl = document.getElementById('fBuyingPrice');
+  if (buyingPriceEl) buyingPriceEl.value = p.buyingPrice || p.buying_price || '';
   document.getElementById('fLocation').value = p.location || '';
   const prev = document.getElementById('imgPreview');
   prev.src = p.image || window.getCatImage(p.category||'G', p.id);
@@ -204,6 +214,7 @@ window.savePart = async function() {
 
   const doSave = async (imgData) => {
     try {
+      const bPrice = parseFloat(document.getElementById('fBuyingPrice')?.value) || 0;
       const payload = {
         partNum,
         desc,
@@ -212,6 +223,8 @@ window.savePart = async function() {
         minStock: parseInt(document.getElementById('fMinStock').value) || 1,
         supplier: document.getElementById('fSupplier').value.trim(),
         priceKsh: parseFloat(document.getElementById('fPriceKsh').value) || 0,
+        buyingPrice: bPrice,
+        buying_price: bPrice,
         location: document.getElementById('fLocation').value.trim(),
         image: imgData,
       };

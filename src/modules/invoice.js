@@ -232,6 +232,37 @@ window.saveInvoice = async function(type = 'invoice') {
     paidAt: null
   };
 
+  let customerObj = null;
+  const dbCustomers = await window.dbGet('customers') || [];
+  customerObj = dbCustomers.find(c => c.name.toLowerCase() === customer.toLowerCase() && !c._deleted);
+
+  if (!customerObj && customer !== 'Walk-in Customer') {
+    customerObj = {
+      id: 'cust_' + Math.random().toString(36).substring(2, 15),
+      name: customer,
+      email: '',
+      phone: '',
+      address: '',
+      notes: 'Auto-created via Invoice ' + invRecord.invoiceNumber,
+      balance: 0,
+      orderCount: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: Date.now()
+    };
+  }
+
+  if (customerObj) {
+    invRecord.customerId = customerObj.id;
+    invRecord.customer_id = customerObj.id;
+    if (type === 'invoice') {
+      customerObj.orderCount = (customerObj.orderCount || 0) + 1;
+      if (invRecord.paymentStatus !== 'paid') {
+        customerObj.balance = (customerObj.balance || 0) + invRecord.grand;
+      }
+      await window.dbPut('customers', customerObj);
+    }
+  }
+
   if (type === 'invoice') {
     for (const item of window.lineItems) {
       if (item.isService) continue; // Skip stock deduction for services
@@ -309,10 +340,19 @@ window.undoLastInvoice = async function() {
       }
     }
 
-    const deleteId = typeof last.id === 'number' ? last.id : parseInt(last.id);
-    if (!isNaN(deleteId)) {
-      await window.dbDelete('invoices', deleteId);
+    if (last.customerId) {
+      const cust = await window.dbGet('customers', last.customerId);
+      if (cust) {
+        cust.orderCount = Math.max(0, (cust.orderCount || 0) - 1);
+        if (last.paymentStatus !== 'paid') {
+          cust.balance = Math.max(0, (cust.balance || 0) - last.grand);
+        }
+        await window.dbPut('customers', cust);
+        if (window.biz && typeof window.biz.init === 'function') await window.biz.init();
+      }
     }
+
+    await window.dbDelete('invoices', String(last.id));
 
     const memIdx = window.invoices.findIndex(i => i.id === last.id || i.invoiceNumber === last.invoiceNumber);
     if (memIdx >= 0) window.invoices.splice(memIdx, 1);
@@ -511,12 +551,45 @@ window.deleteInvoice = async function(id) {
   if (!confirm('Delete this record?')) return;
   const inv = window.invoices.find(i=>String(i.id)===String(id));
   if (!inv) return;
-  await window.dbDelete('invoices', inv.id);
-  window.invoices = window.invoices.filter(i=>String(i.id)!==String(id));
-  window.renderInvoiceList();
-  window.renderQuotationList();
-  if (typeof window.renderAnalytics === 'function') window.renderAnalytics();
-  window.showToast('Record deleted','warn');
+
+  try {
+    if (inv.type === 'invoice') {
+      // 1. Restock parts
+      for (const item of inv.items) {
+        if (item.isService) continue;
+        const part = window.parts.find(p => String(p.id) === String(item.partId));
+        if (part) {
+          part.stock = (part.stock || 0) + item.qty;
+          await window.dbPut('parts', part);
+        }
+      }
+      
+      // 2. Rollback customer balance and orderCount
+      if (inv.customerId) {
+        const cust = await window.dbGet('customers', inv.customerId);
+        if (cust) {
+          cust.orderCount = Math.max(0, (cust.orderCount || 0) - 1);
+          if (inv.paymentStatus !== 'paid') {
+            cust.balance = Math.max(0, (cust.balance || 0) - inv.grand);
+          }
+          await window.dbPut('customers', cust);
+          if (window.biz && typeof window.biz.init === 'function') await window.biz.init();
+        }
+      }
+    }
+
+    await window.dbDelete('invoices', inv.id);
+    window.invoices = window.invoices.filter(i=>String(i.id)!==String(id));
+    window.renderInvoiceList();
+    window.renderQuotationList();
+    if (typeof window.renderAnalytics === 'function') window.renderAnalytics();
+    if (typeof window.renderInventory === 'function') window.renderInventory();
+    if (typeof window.renderDashboard === 'function') window.renderDashboard();
+    window.showToast('Record deleted','warn');
+  } catch (e) {
+    console.error('Delete invoice error:', e);
+    window.showToast('Delete failed: ' + e.message, 'error');
+  }
 };
 
 window.openModal = function(id) {
@@ -1002,6 +1075,16 @@ window.retryMpesaPayment = function() {
 window.markInvoicePaid = async function(invoiceId, mpesaRef) {
   const inv = window.invoices.find(i => i.id === invoiceId || String(i.id) === String(invoiceId));
   if (!inv) return;
+
+  if (inv.customerId && inv.paymentStatus !== 'paid') {
+    const cust = await window.dbGet('customers', inv.customerId);
+    if (cust) {
+      cust.balance = Math.max(0, (cust.balance || 0) - inv.grand);
+      await window.dbPut('customers', cust);
+      if (window.biz && typeof window.biz.init === 'function') await window.biz.init();
+    }
+  }
+
   inv.paymentStatus = 'paid';
   inv.paymentRef = mpesaRef;
   inv.paidAt = new Date().toISOString();

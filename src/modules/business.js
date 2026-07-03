@@ -81,7 +81,8 @@
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-users" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No customers found.</td></tr>`;
       return;
     }
-    tbody.innerHTML = filtered.map(c => `
+    const paged = window.paginateDataset('customers', filtered, renderCustomers);
+    tbody.innerHTML = paged.map(c => `
       <tr>
         <td><strong>${esc(c.name)}</strong></td>
         <td>${esc(c.email) || '<span style="color:var(--dim)">—</span>'}</td>
@@ -150,7 +151,8 @@
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-industry" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No suppliers found.</td></tr>`;
       return;
     }
-    tbody.innerHTML = filtered.map(s => `
+    const paged = window.paginateDataset('suppliers', filtered, renderSuppliers);
+    tbody.innerHTML = paged.map(s => `
       <tr>
         <td><strong>${esc(s.name)}</strong></td>
         <td>${esc(s.contact) || '<span style="color:var(--dim)">—</span>'}</td>
@@ -232,7 +234,9 @@
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-receipt" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No expenses found.</td></tr>`;
       return;
     }
-    tbody.innerHTML = filtered.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e => `
+    const sorted = [...filtered].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    const paged = window.paginateDataset('expenses', sorted, renderExpenses);
+    tbody.innerHTML = paged.map(e => `
       <tr>
         <td style="font-family:var(--font-mono);font-size:12px">${esc(e.date) || '—'}</td>
         <td><strong>${esc(e.description)}</strong></td>
@@ -309,7 +313,8 @@
       tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-id-badge" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No employees found.</td></tr>`;
       return;
     }
-    tbody.innerHTML = filtered.map(e => `
+    const paged = window.paginateDataset('employees', filtered, renderEmployees);
+    tbody.innerHTML = paged.map(e => `
       <tr>
         <td><strong>${esc(e.name)}</strong></td>
         <td><span class="badge badge-muted">${esc(e.role)||'—'}</span></td>
@@ -319,8 +324,9 @@
         <td style="font-family:var(--font-mono);font-size:12px">${esc(e.startDate)||'—'}</td>
         <td><span class="badge ${e.status==='active'?'badge-success':'badge-muted'}">${esc(e.status||'active')}</span></td>
         <td>
-          <button class="btn btn-xs btn-outline" onclick="window.biz.editEmployee('${e.id}')"><i class="fa fa-edit"></i></button>
-          <button class="btn btn-xs btn-danger" onclick="window.biz.deleteRecord('employees','${e.id}')"><i class="fa fa-trash"></i></button>
+          <button class="btn btn-xs btn-outline" onclick="window.biz.editEmployee('${e.id}')" title="Edit Employee"><i class="fa fa-edit"></i></button>
+          <button class="btn btn-xs btn-success" onclick="window.biz.payEmployeeSalary('${e.id}')" title="Record Salary Payment" style="background:#20c997;border-color:#20c997;color:#fff"><i class="fa fa-money-bill-wave"></i> Pay</button>
+          <button class="btn btn-xs btn-danger" onclick="window.biz.deleteRecord('employees','${e.id}')" title="Delete Employee"><i class="fa fa-trash"></i></button>
         </td>
       </tr>`).join('');
   }
@@ -458,7 +464,9 @@
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-cart-plus" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No purchase orders found.</td></tr>`;
       return;
     }
-    tbody.innerHTML = filtered.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(p => {
+    const sorted = [...filtered].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    const paged = window.paginateDataset('purchases', sorted, renderPurchases);
+    tbody.innerHTML = paged.map(p => {
       const statusColor = p.status==='received'?'var(--success)':p.status==='cancelled'?'var(--danger)':'var(--warn)';
       return `
       <tr>
@@ -527,9 +535,79 @@
   // ═══════════════════════════════════════════════════════════════════
   // SAVE / DELETE GENERIC
   // ═══════════════════════════════════════════════════════════════════
+  function parsePurchaseItems(desc) {
+    const lines = (desc || '').split('\n');
+    const items = [];
+    const allParts = window.parts || [];
+    
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      
+      let foundPart = null;
+      let foundQty = 1;
+      
+      const tokens = line.split(/[\s,;:\-\*xX\(\)]+/).map(t => t.trim()).filter(Boolean);
+      
+      for (const token of tokens) {
+        const part = allParts.find(p => p.partNum?.toLowerCase() === token.toLowerCase() || p.part_num?.toLowerCase() === token.toLowerCase());
+        if (part) {
+          foundPart = part;
+          break;
+        }
+      }
+      
+      if (foundPart) {
+        for (const token of tokens) {
+          const num = parseInt(token);
+          if (!isNaN(num) && num > 0 && token !== foundPart.partNum && token !== foundPart.part_num) {
+            foundQty = num;
+            break;
+          }
+        }
+        items.push({ part: foundPart, qty: foundQty });
+      }
+    }
+    return items;
+  }
+
+  async function payEmployeeSalary(employeeId) {
+    const emp = employees.find(e => e.id === employeeId);
+    if (!emp) return window.showToast && window.showToast('Employee not found', 'error');
+    
+    const today = new Date().toISOString().split('T')[0];
+    const expenseRecord = {
+      id: 'exp_sal_' + emp.id + '_' + Date.now(),
+      description: `Salary payment for ${emp.name} (${emp.role})`,
+      amount: Number(emp.salary) || 0,
+      date: today,
+      category: 'Salary',
+      paymentMethod: 'Bank Transfer',
+      reference: `PAYROLL-${Date.now().toString().slice(-6)}`,
+      notes: `Salary recorded via payroll page for employee ${emp.name}.`,
+      updatedAt: Date.now()
+    };
+    
+    try {
+      await window.dbPut('expenses', expenseRecord);
+      expenses.push(expenseRecord);
+      window.showToast && window.showToast(`Salary of KSH ${emp.salary.toLocaleString()} recorded as Expense for ${emp.name}`, 'success');
+      
+      refreshPage('expenses');
+      refreshPage('employees');
+      window.syncData && window.syncData();
+    } catch(e) {
+      window.showToast && window.showToast('Salary record failed: ' + e.message, 'danger');
+    }
+  }
+
   async function saveRecord(store) {
     const record = gatherFields(store);
     if (!record) return;
+
+    let oldPo = null;
+    if (store === 'purchases' && editingId) {
+      oldPo = purchases.find(p => p.id === editingId);
+    }
 
     if (editingId) {
       record.id = editingId;
@@ -538,11 +616,55 @@
       if (idx !== -1) arr[idx] = { ...arr[idx], ...record };
       else arr.push(record);
     } else {
+      record.id = store.substring(0,3) + '_' + Date.now();
       getArr(store).push(record);
     }
 
     try {
       await window.dbPut(store, record);
+
+      // Purchases received logic
+      if (store === 'purchases' && record.status === 'received' && (!oldPo || oldPo.status !== 'received')) {
+        // 1. Parse description and adjust stock
+        const parsed = parsePurchaseItems(record.description);
+        for (const item of parsed) {
+          item.part.stock = (item.part.stock || 0) + item.qty;
+          await window.dbPut('parts', item.part);
+          if (window.logActivity) {
+            await window.logActivity(`Received purchase parts: ${item.part.partNum} (+${item.qty})`, 'stock');
+          }
+        }
+        
+        // 2. Automatically log an Expense under "Parts & Supplies"
+        const expenseRecord = {
+          id: 'exp_po_' + record.id,
+          description: `PO Receipt: ${record.poNumber} from ${record.supplier}`,
+          amount: Number(record.total) || 0,
+          date: record.date || new Date().toISOString().split('T')[0],
+          category: 'Parts & Supplies',
+          paymentMethod: 'Bank Transfer',
+          reference: record.poNumber,
+          notes: record.notes || 'Automatically recorded via PO status set to received.',
+          updatedAt: Date.now()
+        };
+        await window.dbPut('expenses', expenseRecord);
+        expenses.push(expenseRecord);
+        
+        // 3. Update supplier statistics
+        const supplierObj = suppliers.find(s => s.name === record.supplier);
+        if (supplierObj) {
+          supplierObj.orderCount = (supplierObj.orderCount || 0) + 1;
+          const poDate = new Date(record.date);
+          const receivedDate = new Date();
+          const daysDiff = Math.max(1, Math.round((receivedDate - poDate) / (1000 * 60 * 60 * 24)));
+          supplierObj.leadDays = Math.round(((supplierObj.leadDays || 14) + daysDiff) / 2);
+          await window.dbPut('suppliers', supplierObj);
+        }
+        
+        if (typeof window.renderInventory === 'function') window.renderInventory();
+        if (typeof window.renderDashboard === 'function') window.renderDashboard();
+      }
+
       const modalId = { customers:'custModal', suppliers:'supModal', expenses:'expModal', employees:'empModal', categories:'catMgmtModal', purchases:'purModal' }[store];
       closeModal(modalId);
       // If categories changed, refresh global window.categories and update all dropdowns
@@ -669,6 +791,46 @@
     URL.revokeObjectURL(url);
   }
 
+  function exportCustomersExcel() {
+    const data = customers.filter(c=>!c._deleted);
+    if (!data.length) { window.showToast && window.showToast('No customers to export','warn'); return; }
+    const headers = ['Name','Company','Email','Phone','Address','Orders','Balance (KSH)','Notes'];
+    const rows = data.map(c => [c.name||'', c.company||'', c.email||'', c.phone||'', c.address||'', c.orderCount||0, c.balance||0, c.notes||'']);
+    window.exportToExcel(headers, rows, 'Customers', `Printex_Customers_${new Date().toISOString().split('T')[0]}.xlsx`);
+  }
+
+  function exportSuppliersExcel() {
+    const data = suppliers.filter(s=>!s._deleted);
+    if (!data.length) { window.showToast && window.showToast('No suppliers to export','warn'); return; }
+    const headers = ['Name','Contact','Phone','Email','Products','Lead Days','Address','Notes'];
+    const rows = data.map(s => [s.name||'', s.contact||'', s.phone||'', s.email||'', s.products||'', s.leadDays||'', s.address||'', s.notes||'']);
+    window.exportToExcel(headers, rows, 'Suppliers', `Printex_Suppliers_${new Date().toISOString().split('T')[0]}.xlsx`);
+  }
+
+  function exportExpensesExcel() {
+    const data = expenses.filter(e=>!e._deleted);
+    if (!data.length) { window.showToast && window.showToast('No expenses to export','warn'); return; }
+    const headers = ['Date','Description','Category','Amount (KSH)','Payment Method','Reference','Notes'];
+    const rows = data.map(e => [e.date||'', e.description||'', e.category||'', e.amount||0, e.paymentMethod||'', e.reference||'', e.notes||'']);
+    window.exportToExcel(headers, rows, 'Expenses', `Printex_Expenses_${new Date().toISOString().split('T')[0]}.xlsx`);
+  }
+
+  function exportEmployeesExcel() {
+    const data = employees.filter(e=>!e._deleted);
+    if (!data.length) { window.showToast && window.showToast('No employees to export','warn'); return; }
+    const headers = ['Name','Role','Phone','Email','Salary (KSH)','Start Date','Status','National ID','Notes'];
+    const rows = data.map(e => [e.name||'', e.role||'', e.phone||'', e.email||'', e.salary||0, e.startDate||'', e.status||'active', e.nationalId||'', e.notes||'']);
+    window.exportToExcel(headers, rows, 'Employees', `Printex_Employees_${new Date().toISOString().split('T')[0]}.xlsx`);
+  }
+
+  function exportPurchasesExcel() {
+    const data = purchases.filter(p=>!p._deleted);
+    if (!data.length) { window.showToast && window.showToast('No purchases to export','warn'); return; }
+    const headers = ['PO Number','Date','Supplier','Total (KSH)','Status','Expected Delivery','Description','Notes'];
+    const rows = data.map(p => [p.poNumber||'', p.date||'', p.supplier||'', p.total||0, p.status||'pending', p.expectedDate||'', p.description||'', p.notes||'']);
+    window.exportToExcel(headers, rows, 'Purchases', `Printex_Purchases_${new Date().toISOString().split('T')[0]}.xlsx`);
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // INIT + PUBLIC API
   // ═══════════════════════════════════════════════════════════════════
@@ -689,19 +851,24 @@
     filterCustomers: () => loadAndRender('customers', renderCustomers),
     openCustomerModal: () => openCustomerModal(),
     editCustomer: id => openCustomerModal(id),
+    exportCustomersExcel,
     // Suppliers
     filterSuppliers: () => loadAndRender('suppliers', renderSuppliers),
     openSupplierModal: () => openSupplierModal(),
     editSupplier: id => openSupplierModal(id),
+    exportSuppliersExcel,
     // Expenses
     filterExpenses: () => loadAndRender('expenses', renderExpenses),
     openExpenseModal: () => openExpenseModal(),
     editExpense: id => openExpenseModal(id),
     exportExpensesCSV,
+    exportExpensesExcel,
     // Employees
     filterEmployees: () => loadAndRender('employees', renderEmployees),
     openEmployeeModal: () => openEmployeeModal(),
     editEmployee: id => openEmployeeModal(id),
+    exportEmployeesExcel,
+    payEmployeeSalary: id => payEmployeeSalary(id),
     // Categories
     filterCategories: () => loadAndRender('categories', renderCategories),
     openCategoryModal: () => openCategoryModal(),
@@ -710,6 +877,7 @@
     filterPurchases: () => loadAndRender('purchases', renderPurchases),
     openPurchaseModal: () => openPurchaseModal(),
     editPurchase: id => openPurchaseModal(id),
+    exportPurchasesExcel,
     // Common
     saveRecord,
     deleteRecord

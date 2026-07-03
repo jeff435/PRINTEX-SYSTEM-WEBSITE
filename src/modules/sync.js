@@ -6,6 +6,7 @@
 window.isSyncing = false;
 
 // Helper to perform fetch requests authenticated by Firebase ID tokens, with a single-retry on 401.
+window.authenticatedFetch = authenticatedFetch;
 async function authenticatedFetch(url, options = {}) {
   let token;
   try {

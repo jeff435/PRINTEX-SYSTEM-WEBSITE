@@ -844,6 +844,7 @@ window.initializeFirestoreListeners = async function(userId) {
           // Trigger default categories seeding in background
           window.seedDefaultCategories(userId).catch(e => console.error('[updateAndRender] Default categories seeding failed:', e));
         } else {
+          window.categories = activeCats;
           if (typeof window.populateCategorySelects === 'function') {
             window.populateCategorySelects();
           }
@@ -868,6 +869,17 @@ window.initializeFirestoreListeners = async function(userId) {
     if (typeof window.renderDashboard === 'function') window.renderDashboard();
     if (typeof window.renderReports === 'function') window.renderReports();
     if (typeof window.updateBottomNavBadge === 'function') window.updateBottomNavBadge();
+
+    // SQLite local persistence: push incoming Cloud sync updates to local SQLite database
+    if (navigator.onLine && firestoreData.length > 0 && typeof window.authenticatedFetch === 'function') {
+      const payload = {};
+      payload[store] = firestoreData;
+      window.authenticatedFetch('/api/sync/push', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      }).catch(err => console.warn(`[Sync] Failed to push incoming ${store} updates to SQLite:`, err));
+    }
+
     window.updateSyncStatus('synced');
   };
 

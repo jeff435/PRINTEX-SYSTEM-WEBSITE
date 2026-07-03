@@ -133,6 +133,49 @@ window.exportReportCSV = function(type) {
   window.downloadExcelCSV(rows, filename);
 };
 
+window.exportReportExcel = function(type) {
+  const now = new Date().toLocaleDateString('en-KE').replace(/\//g,'-');
+  let headers, rows, sheetName, filename;
+
+  if (type === 'out') {
+    const data = window.parts.filter(p => (p.stock||0) === 0);
+    if (!data.length) { window.showToast('No out-of-stock items to export', 'warn'); return; }
+    headers = ['SKU / Part Number','Description','Category','Min Stock Required','Supplier','Location'];
+    rows = data.map(p => [
+      p.partNum||p.part_num||'', p.desc||p.description||'',
+      p.category||'', p.minStock||p.min_stock||1,
+      p.supplier||'', p.location||''
+    ]);
+    sheetName = 'Out of Stock';
+    filename = `Printex_OutOfStock_${now}.xlsx`;
+  } else if (type === 'low') {
+    const data = window.parts.filter(p => (p.stock||0) > 0 && (p.stock||0) <= (p.minStock||p.min_stock||1));
+    if (!data.length) { window.showToast('No low-stock items to export', 'warn'); return; }
+    headers = ['SKU / Part Number','Description','Category','Current Stock','Min Stock','Buying Price (KSH)','Selling Price (KSH)','Supplier'];
+    rows = data.map(p => [
+      p.partNum||p.part_num||'', p.desc||p.description||'',
+      p.category||'', p.stock||0, p.minStock||p.min_stock||1,
+      Number(p.buyingPrice||p.buying_price||0),
+      Number(p.priceKsh||p.price_ksh||0), p.supplier||''
+    ]);
+    sheetName = 'Low Stock';
+    filename = `Printex_LowStock_${now}.xlsx`;
+  } else {
+    if (!window.invoices.length) { window.showToast('No invoices to export', 'warn'); return; }
+    headers = ['Invoice Number','Date','Customer','Items','Subtotal (KSH)','VAT (KSH)','Grand Total (KSH)','Type','Payment Status'];
+    rows = window.invoices.map(i => [
+      i.invoiceNumber||'', i.date||'', i.customer||'',
+      (i.items||[]).length,
+      Math.round(i.subtotal||0), Math.round(i.vat||0), Math.round(i.grand||0),
+      i.type||'invoice', i.paymentStatus||i.status||'draft'
+    ]);
+    sheetName = 'Sales';
+    filename = `Printex_Sales_${now}.xlsx`;
+  }
+
+  window.exportToExcel(headers, rows, sheetName, filename);
+};
+
 window.downloadFile = function(content, filename, mime) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
