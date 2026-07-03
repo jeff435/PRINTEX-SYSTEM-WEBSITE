@@ -46,7 +46,12 @@
       employees  = (await window.dbGet('employees'))  || [];
       categories = (await window.dbGet('categories')) || [];
       purchases  = (await window.dbGet('purchases'))  || [];
-      // Keep global window.categories in sync so inventory dropdowns work
+      // Keep global window arrays in sync so spreadsheet.js and analytics.js export functions work
+      window.customers  = customers.filter(c => !c._deleted);
+      window.suppliers  = suppliers.filter(s => !s._deleted);
+      window.expenses   = expenses.filter(e => !e._deleted);
+      window.employees  = employees.filter(e => !e._deleted);
+      window.purchases  = purchases.filter(p => !p._deleted);
       window.categories = categories.filter(c => !c._deleted);
       if (typeof window.populateCategorySelects === 'function') {
         window.populateCategorySelects();

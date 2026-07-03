@@ -228,4 +228,301 @@
     win.document.close();
   };
 
+  window.exportTableToPDF = function(title, headers, rows, filename) {
+    if (typeof html2pdf === 'undefined') {
+      window.showToast('PDF library still loading — please retry.', 'warn');
+      return;
+    }
+    const container = document.createElement('div');
+    container.style.cssText = 'font-family:"Segoe UI",sans-serif;padding:24px;color:#333;background:#fff;';
+    container.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #3b82f6;padding-bottom:12px;margin-bottom:16px;">
+        <div>
+          <h2 style="margin:0;font-size:22px;color:#1e3a8a;">Printex Engineers Limited</h2>
+          <div style="font-size:12px;color:#666;margin-top:2px;">Business & Inventory Management Platform</div>
+        </div>
+        <div style="text-align:right;">
+          <h3 style="margin:0;font-size:16px;color:#475569;">${title}</h3>
+          <div style="font-size:11px;color:#94a3b8;margin-top:2px;">Generated: ${new Date().toLocaleString('en-KE')}</div>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-top:10px;font-size:11px;">
+        <thead>
+          <tr style="background:#f1f5f9;color:#1e293b;border-bottom:1.5px solid #cbd5e1;">
+            ${headers.map(h => `<th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;font-weight:700;">${h}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `<tr style="border-bottom:1px solid #f1f5f9;">${r.map(c => `<td style="border:1px solid #e2e8f0;padding:7px 10px;color:#334155;">${c !== null && c !== undefined ? c : ''}</td>`).join('')}</tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+    
+    const opt = {
+      margin: [0.4, 0.4, 0.4, 0.4],
+      filename: filename,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape' }
+    };
+    
+    window.showToast('Generating PDF Report...', 'info');
+    html2pdf().set(opt).from(container).save().then(() => {
+      window.showToast(`PDF downloaded: ${filename}`, 'success');
+    }).catch(err => {
+      window.showToast('PDF error: ' + err.message, 'error');
+    });
+  };
+
+  // --- Page-specific export & print triggers ---
+  window.exportInventoryExcel = function() {
+    const data = (window.parts || []).filter(p => !p.isService);
+    const headers = ['SKU / Part Number', 'Category', 'Description', 'Current Stock', 'Min Stock', 'Price (KSH)', 'Supplier', 'Location'];
+    const rows = data.map(p => [p.partNum||'', p.category||'', p.desc||'', p.stock||0, p.minStock||0, p.priceKsh||0, p.supplier||'', p.location||'']);
+    window.exportToExcel(headers, rows, 'Inventory', `Printex_Inventory_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  window.exportInventoryPDF = function() {
+    const data = (window.parts || []).filter(p => !p.isService);
+    const headers = ['SKU / Part Number', 'Category', 'Description', 'Stock', 'Min', 'Price (KSH)', 'Supplier', 'Location'];
+    const rows = data.map(p => [p.partNum||'', p.category||'', p.desc||'', p.stock||0, p.minStock||0, p.priceKsh||0, p.supplier||'', p.location||'']);
+    window.exportTableToPDF('Inventory Report', headers, rows, `Printex_Inventory_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  window.printInventoryTable = function() {
+    const data = (window.parts || []).filter(p => !p.isService);
+    const headers = ['SKU / Part Number', 'Category', 'Description', 'Stock', 'Min', 'Price (KSH)', 'Supplier', 'Location'];
+    const rows = data.map(p => [p.partNum||'', p.category||'', p.desc||'', p.stock||0, p.minStock||0, p.priceKsh||0, p.supplier||'', p.location||'']);
+    window.printTableDataset('Inventory Report', headers, rows);
+  };
+
+  window.exportInvoicesExcel = function() {
+    const data = (window.invoices || []).filter(i => i.type === 'invoice');
+    const headers = ['Invoice Number', 'Date', 'Customer', 'Subtotal (KSH)', 'VAT (KSH)', 'Grand Total (KSH)', 'Payment Status', 'Delivery Status'];
+    const rows = data.map(i => [i.invoiceNumber||'', i.date||'', i.customer||'', i.subtotal||0, i.vat||0, i.grand||0, i.paymentStatus||'draft', i.deliveryStatus||'pending']);
+    window.exportToExcel(headers, rows, 'Invoices', `Printex_Invoices_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  window.exportInvoicesCSV = function() {
+    const data = (window.invoices || []).filter(i => i.type === 'invoice');
+    const headers = ['Invoice Number', 'Date', 'Customer', 'Subtotal', 'VAT', 'Grand Total', 'Payment Status', 'Delivery Status'];
+    const rows = [headers, ...data.map(i => [i.invoiceNumber||'', i.date||'', i.customer||'', i.subtotal||0, i.vat||0, i.grand||0, i.paymentStatus||'draft', i.deliveryStatus||'pending'])];
+    window.downloadExcelCSV(rows, `Printex_Invoices_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  window.exportInvoicesPDF = function() {
+    const data = (window.invoices || []).filter(i => i.type === 'invoice');
+    const headers = ['Invoice Number', 'Date', 'Customer', 'Subtotal (KSH)', 'VAT (KSH)', 'Grand Total (KSH)', 'Payment Status'];
+    const rows = data.map(i => [i.invoiceNumber||'', i.date||'', i.customer||'', i.subtotal||0, i.vat||0, i.grand||0, i.paymentStatus||'draft']);
+    window.exportTableToPDF('Sales Invoices Report', headers, rows, `Printex_Invoices_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  window.printInvoicesTable = function() {
+    const data = (window.invoices || []).filter(i => i.type === 'invoice');
+    const headers = ['Invoice Number', 'Date', 'Customer', 'Subtotal (KSH)', 'VAT (KSH)', 'Grand Total (KSH)', 'Payment Status'];
+    const rows = data.map(i => [i.invoiceNumber||'', i.date||'', i.customer||'', i.subtotal||0, i.vat||0, i.grand||0, i.paymentStatus||'draft']);
+    window.printTableDataset('Sales Invoices Report', headers, rows);
+  };
+
+  window.exportQuotationsExcel = function() {
+    const data = (window.invoices || []).filter(i => i.type === 'quotation');
+    const headers = ['Quotation Number', 'Date', 'Customer', 'Subtotal (KSH)', 'VAT (KSH)', 'Grand Total (KSH)', 'Status'];
+    const rows = data.map(i => [i.invoiceNumber||'', i.date||'', i.customer||'', i.subtotal||0, i.vat||0, i.grand||0, i.paymentStatus||'draft']);
+    window.exportToExcel(headers, rows, 'Quotations', `Printex_Quotations_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  window.exportQuotationsCSV = function() {
+    const data = (window.invoices || []).filter(i => i.type === 'quotation');
+    const headers = ['Quotation Number', 'Date', 'Customer', 'Subtotal', 'VAT', 'Grand Total', 'Status'];
+    const rows = [headers, ...data.map(i => [i.invoiceNumber||'', i.date||'', i.customer||'', i.subtotal||0, i.vat||0, i.grand||0, i.paymentStatus||'draft'])];
+    window.downloadExcelCSV(rows, `Printex_Quotations_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  window.exportQuotationsPDF = function() {
+    const data = (window.invoices || []).filter(i => i.type === 'quotation');
+    const headers = ['Quotation Number', 'Date', 'Customer', 'Subtotal (KSH)', 'VAT (KSH)', 'Grand Total (KSH)', 'Status'];
+    const rows = data.map(i => [i.invoiceNumber||'', i.date||'', i.customer||'', i.subtotal||0, i.vat||0, i.grand||0, i.paymentStatus||'draft']);
+    window.exportTableToPDF('Proforma Quotations Report', headers, rows, `Printex_Quotations_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  window.printQuotationsTable = function() {
+    const data = (window.invoices || []).filter(i => i.type === 'quotation');
+    const headers = ['Quotation Number', 'Date', 'Customer', 'Subtotal (KSH)', 'VAT (KSH)', 'Grand Total (KSH)', 'Status'];
+    const rows = data.map(i => [i.invoiceNumber||'', i.date||'', i.customer||'', i.subtotal||0, i.vat||0, i.grand||0, i.paymentStatus||'draft']);
+    window.printTableDataset('Proforma Quotations Report', headers, rows);
+  };
+
+  window.exportCustomersCSV = function() {
+    const data = (window.customers || []).filter(c => !c._deleted);
+    const headers = ['Name', 'Company', 'Email', 'Phone', 'Address', 'Orders', 'Balance (KSH)', 'Notes'];
+    const rows = [headers, ...data.map(c => [c.name||'', c.company||'', c.email||'', c.phone||'', c.address||'', c.orderCount||0, c.balance||0, c.notes||''])];
+    window.downloadExcelCSV(rows, `Printex_Customers_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  window.exportCustomersPDF = function() {
+    const data = (window.customers || []).filter(c => !c._deleted);
+    const headers = ['Name', 'Company', 'Email', 'Phone', 'Address', 'Orders', 'Balance (KSH)'];
+    const rows = data.map(c => [c.name||'', c.company||'', c.email||'', c.phone||'', c.address||'', c.orderCount||0, c.balance||0]);
+    window.exportTableToPDF('Customers Report', headers, rows, `Printex_Customers_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  window.exportSuppliersCSV = function() {
+    const data = (window.suppliers || []).filter(s => !s._deleted);
+    const headers = ['Name', 'Contact', 'Phone', 'Email', 'Products', 'Lead Days', 'Address', 'Notes'];
+    const rows = [headers, ...data.map(s => [s.name||'', s.contact||'', s.phone||'', s.email||'', s.products||'', s.leadDays||'', s.address||'', s.notes||''])];
+    window.downloadExcelCSV(rows, `Printex_Suppliers_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  window.exportSuppliersPDF = function() {
+    const data = (window.suppliers || []).filter(s => !s._deleted);
+    const headers = ['Name', 'Contact', 'Phone', 'Email', 'Products', 'Lead Days', 'Address'];
+    const rows = data.map(s => [s.name||'', s.contact||'', s.phone||'', s.email||'', s.products||'', s.leadDays||'', s.address||'']);
+    window.exportTableToPDF('Suppliers Report', headers, rows, `Printex_Suppliers_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  window.exportExpensesPDF = function() {
+    const data = (window.expenses || []).filter(e => !e._deleted);
+    const headers = ['Date', 'Description', 'Category', 'Amount (KSH)', 'Payment Method', 'Reference'];
+    const rows = data.map(e => [e.date||'', e.description||'', e.category||'', e.amount||0, e.paymentMethod||'', e.reference||'']);
+    window.exportTableToPDF('Expenses Report', headers, rows, `Printex_Expenses_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  window.exportEmployeesPDF = function() {
+    const data = (window.employees || []).filter(e => !e._deleted);
+    const headers = ['Name', 'Role', 'Phone', 'Email', 'Salary (KSH)', 'Start Date', 'Status'];
+    const rows = data.map(e => [e.name||'', e.role||'', e.phone||'', e.email||'', e.salary||0, e.startDate||'', e.status||'active']);
+    window.exportTableToPDF('Employees Report', headers, rows, `Printex_Employees_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  window.exportPurchasesCSV = function() {
+    const data = (window.purchases || []).filter(p => !p._deleted);
+    const headers = ['PO Number', 'Date', 'Supplier', 'Total (KSH)', 'Status', 'Expected Delivery', 'Description'];
+    const rows = [headers, ...data.map(p => [p.poNumber||'', p.date||'', p.supplier||'', p.total||0, p.status||'pending', p.expectedDate||'', p.description||''])];
+    window.downloadExcelCSV(rows, `Printex_Purchases_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+
+  window.exportPurchasesPDF = function() {
+    const data = (window.purchases || []).filter(p => !p._deleted);
+    const headers = ['PO Number', 'Date', 'Supplier', 'Total (KSH)', 'Status', 'Expected Delivery'];
+    const rows = data.map(p => [p.poNumber||'', p.date||'', p.supplier||'', p.total||0, p.status||'pending', p.expectedDate||'']);
+    window.exportTableToPDF('Purchase Orders Report', headers, rows, `Printex_Purchases_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  // ── Inventory CSV alias ──────────────────────────────────────────
+  window.exportInventoryCSV = function() {
+    if (typeof window.exportCSV === 'function') { window.exportCSV(); return; }
+    const data = (window.parts || []).filter(p => !p.isService);
+    const headers = ['SKU / Part Number', 'Category', 'Description', 'Current Stock', 'Min Stock', 'Price (KSH)', 'Supplier', 'Location'];
+    const rows = [headers, ...data.map(p => [p.partNum||'', p.category||'', p.desc||'', p.stock||0, p.minStock||0, p.priceKsh||0, p.supplier||'', p.location||''])];
+    window.downloadExcelCSV(rows, `Printex_Inventory_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  // ── Print functions for all business pages ──────────────────────
+  window.printCustomersTable = function() {
+    const data = (window.customers || []).filter(c => !c._deleted);
+    const headers = ['Name', 'Company', 'Email', 'Phone', 'Address', 'Orders', 'Balance (KSH)'];
+    const rows = data.map(c => [c.name||'', c.company||'', c.email||'', c.phone||'', c.address||'', c.orderCount||0, c.balance||0]);
+    window.printTableDataset('Customers Report', headers, rows);
+  };
+
+  window.printSuppliersTable = function() {
+    const data = (window.suppliers || []).filter(s => !s._deleted);
+    const headers = ['Name', 'Contact', 'Phone', 'Email', 'Products', 'Lead Time (days)', 'Address'];
+    const rows = data.map(s => [s.name||'', s.contact||'', s.phone||'', s.email||'', s.products||'', s.leadDays||'', s.address||'']);
+    window.printTableDataset('Suppliers Report', headers, rows);
+  };
+
+  window.printExpensesTable = function() {
+    const data = (window.expenses || []).filter(e => !e._deleted);
+    const headers = ['Date', 'Description', 'Category', 'Amount (KSH)', 'Payment Method', 'Reference'];
+    const rows = data.map(e => [e.date||'', e.description||'', e.category||'', e.amount||0, e.paymentMethod||'', e.reference||'']);
+    window.printTableDataset('Expenses Report', headers, rows);
+  };
+
+  window.printEmployeesTable = function() {
+    const data = (window.employees || []).filter(e => !e._deleted);
+    const headers = ['Name', 'Role', 'Phone', 'Email', 'Salary (KSH)', 'Start Date', 'Status'];
+    const rows = data.map(e => [e.name||'', e.role||'', e.phone||'', e.email||'', e.salary||0, e.startDate||'', e.status||'active']);
+    window.printTableDataset('Employees Report', headers, rows);
+  };
+
+  window.printPurchasesTable = function() {
+    const data = (window.purchases || []).filter(p => !p._deleted);
+    const headers = ['PO Number', 'Date', 'Supplier', 'Total (KSH)', 'Status', 'Expected Delivery'];
+    const rows = data.map(p => [p.poNumber||'', p.date||'', p.supplier||'', p.total||0, p.status||'pending', p.expectedDate||'']);
+    window.printTableDataset('Purchase Orders Report', headers, rows);
+  };
+
+  // ── Suppliers Excel (global alias for HTML button) ───────────────
+  window.exportSuppliersExcel = function() {
+    if (window.biz && typeof window.biz.exportSuppliersExcel === 'function') {
+      window.biz.exportSuppliersExcel(); return;
+    }
+    const data = (window.suppliers || []).filter(s => !s._deleted);
+    const headers = ['Name', 'Contact', 'Phone', 'Email', 'Products', 'Lead Days', 'Address', 'Notes'];
+    const rows = data.map(s => [s.name||'', s.contact||'', s.phone||'', s.email||'', s.products||'', s.leadDays||'', s.address||'', s.notes||'']);
+    window.exportToExcel(headers, rows, 'Suppliers', `Printex_Suppliers_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // ── Expenses Excel (global alias for HTML button) ─────────────────
+  window.exportExpensesExcel = function() {
+    if (window.biz && typeof window.biz.exportExpensesExcel === 'function') {
+      window.biz.exportExpensesExcel(); return;
+    }
+    const data = (window.expenses || []).filter(e => !e._deleted);
+    const headers = ['Date', 'Description', 'Category', 'Amount (KSH)', 'Payment Method', 'Reference', 'Notes'];
+    const rows = data.map(e => [e.date||'', e.description||'', e.category||'', e.amount||0, e.paymentMethod||'', e.reference||'', e.notes||'']);
+    window.exportToExcel(headers, rows, 'Expenses', `Printex_Expenses_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // ── Employees Excel (global alias for HTML button) ───────────────
+  window.exportEmployeesExcel = function() {
+    if (window.biz && typeof window.biz.exportEmployeesExcel === 'function') {
+      window.biz.exportEmployeesExcel(); return;
+    }
+    const data = (window.employees || []).filter(e => !e._deleted);
+    const headers = ['Name', 'Role', 'Phone', 'Email', 'Salary (KSH)', 'Start Date', 'Status', 'Notes'];
+    const rows = data.map(e => [e.name||'', e.role||'', e.phone||'', e.email||'', e.salary||0, e.startDate||'', e.status||'active', e.notes||'']);
+    window.exportToExcel(headers, rows, 'Employees', `Printex_Employees_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // ── Customers Excel (global alias for HTML button) ───────────────
+  window.exportCustomersExcel = function() {
+    if (window.biz && typeof window.biz.exportCustomersExcel === 'function') {
+      window.biz.exportCustomersExcel(); return;
+    }
+    const data = (window.customers || []).filter(c => !c._deleted);
+    const headers = ['Name', 'Company', 'Email', 'Phone', 'Address', 'Orders', 'Balance (KSH)', 'Notes'];
+    const rows = data.map(c => [c.name||'', c.company||'', c.email||'', c.phone||'', c.address||'', c.orderCount||0, c.balance||0, c.notes||'']);
+    window.exportToExcel(headers, rows, 'Customers', `Printex_Customers_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // ── Purchases Excel (global alias for HTML button) ───────────────
+  window.exportPurchasesExcel = function() {
+    if (window.biz && typeof window.biz.exportPurchasesExcel === 'function') {
+      window.biz.exportPurchasesExcel(); return;
+    }
+    const data = (window.purchases || []).filter(p => !p._deleted);
+    const headers = ['PO Number', 'Date', 'Supplier', 'Total (KSH)', 'Status', 'Expected Delivery', 'Description'];
+    const rows = data.map(p => [p.poNumber||'', p.date||'', p.supplier||'', p.total||0, p.status||'pending', p.expectedDate||'', p.description||'']);
+    window.exportToExcel(headers, rows, 'Purchases', `Printex_Purchases_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // ── Expenses CSV (global alias) ──────────────────────────────────
+  window.exportExpensesCSV = function() {
+    const data = (window.expenses || []).filter(e => !e._deleted);
+    const headers = ['Date', 'Description', 'Category', 'Amount (KSH)', 'Payment Method', 'Reference'];
+    const rows = [headers, ...data.map(e => [e.date||'', e.description||'', e.category||'', e.amount||0, e.paymentMethod||'', e.reference||''])];
+    window.downloadExcelCSV(rows, `Printex_Expenses_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  // ── Employees CSV (global alias) ─────────────────────────────────
+  window.exportEmployeesCSV = function() {
+    const data = (window.employees || []).filter(e => !e._deleted);
+    const headers = ['Name', 'Role', 'Phone', 'Email', 'Salary (KSH)', 'Start Date', 'Status'];
+    const rows = [headers, ...data.map(e => [e.name||'', e.role||'', e.phone||'', e.email||'', e.salary||0, e.startDate||'', e.status||'active'])];
+    window.downloadExcelCSV(rows, `Printex_Employees_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
 })();

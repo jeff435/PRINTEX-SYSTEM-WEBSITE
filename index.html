@@ -1354,7 +1354,10 @@ input[title]:hover::before,select[title]:hover::before{display:none}
           <option value="out">Out of Stock</option>
         </select>
         <button class="btn btn-primary btn-sm" onclick="openAddPart()" title="Add a new part to the inventory"><i class="fa fa-plus"></i> Add Part</button>
-        <button class="btn btn-outline btn-sm" onclick="exportCSV()" title="Download the full inventory as a CSV spreadsheet file"><i class="fa fa-file-csv"></i> Export CSV</button>
+        <button class="btn btn-success btn-sm" onclick="exportInventoryExcel()" title="Export Inventory to Excel"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="exportInventoryCSV()" title="Export Inventory to CSV"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="exportInventoryPDF()" title="Export Inventory to PDF"><i class="fa fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="printInventoryTable()" title="Print Inventory Table"><i class="fa fa-print"></i> Print</button>
       </div>
       <div class="table-wrap">
         <table id="invTable">
@@ -1373,6 +1376,10 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="invListSearch" placeholder="Search finalized invoices..." oninput="filterInvoiceList()"/></div>
         <button class="btn btn-primary btn-sm" onclick="showPage('createInvoice',document.querySelectorAll('.nav-item')[5])"><i class="fa fa-plus"></i> New Invoice</button>
+        <button class="btn btn-success btn-sm" onclick="exportInvoicesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="exportInvoicesCSV()"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="exportInvoicesPDF()"><i class="fa fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="printInvoicesTable()"><i class="fa fa-print"></i> Print</button>
       </div>
       <div class="table-wrap">
         <table id="invoiceListTable">
@@ -1388,6 +1395,10 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="quotListSearch" placeholder="Search proforma quotations..." oninput="filterQuotationList()"/></div>
         <button class="btn btn-primary btn-sm" onclick="showPage('createInvoice',document.querySelectorAll('.nav-item')[5])"><i class="fa fa-plus"></i> New Quotation</button>
+        <button class="btn btn-success btn-sm" onclick="exportQuotationsExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="exportQuotationsCSV()"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="exportQuotationsPDF()"><i class="fa fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="printQuotationsTable()"><i class="fa fa-print"></i> Print</button>
       </div>
       <div class="table-wrap">
         <table id="quotationListTable">
@@ -1466,16 +1477,16 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="kpi-grid" id="reportKpis" style="grid-template-columns:repeat(3,1fr)"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px">
         <div class="card">
-          <div class="card-header"><div class="card-title">Out of Stock Parts</div><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="exportReportCSV('out')"><i class="fa fa-download"></i> CSV</button><button class="btn btn-success btn-xs" onclick="exportReportExcel('out')"><i class="fa fa-file-excel"></i> Excel</button></div></div>
+          <div class="card-header"><div class="card-title">Out of Stock Parts</div><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="exportReportCSV('out')"><i class="fa fa-download"></i> CSV</button><button class="btn btn-success btn-xs" onclick="exportReportExcel('out')"><i class="fa fa-file-excel"></i> Excel</button><button class="btn btn-danger btn-xs" onclick="exportReportPDF('out')"><i class="fa fa-file-pdf"></i> PDF</button><button class="btn btn-outline btn-xs" onclick="printReport('out')"><i class="fa fa-print"></i> Print</button></div></div>
           <div class="table-wrap"><table id="outStockTable"><thead><tr><th>SKU</th><th>Description</th><th>Min Stock</th><th>Supplier</th></tr></thead><tbody id="outStockBody"></tbody></table></div>
         </div>
         <div class="card">
-          <div class="card-header"><div class="card-title">Low Stock Parts</div><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="exportReportCSV('low')"><i class="fa fa-download"></i> CSV</button><button class="btn btn-success btn-xs" onclick="exportReportExcel('low')"><i class="fa fa-file-excel"></i> Excel</button></div></div>
+          <div class="card-header"><div class="card-title">Low Stock Parts</div><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="exportReportCSV('low')"><i class="fa fa-download"></i> CSV</button><button class="btn btn-success btn-xs" onclick="exportReportExcel('low')"><i class="fa fa-file-excel"></i> Excel</button><button class="btn btn-danger btn-xs" onclick="exportReportPDF('low')"><i class="fa fa-file-pdf"></i> PDF</button><button class="btn btn-outline btn-xs" onclick="printReport('low')"><i class="fa fa-print"></i> Print</button></div></div>
           <div class="table-wrap"><table id="lowStockTable"><thead><tr><th>SKU</th><th>Description</th><th>Stock</th><th>Min</th></tr></thead><tbody id="lowStockBody"></tbody></table></div>
         </div>
       </div>
       <div class="card" style="margin-top:16px">
-        <div class="card-header"><div class="card-title">Invoice / Sales Summary</div><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="exportReportCSV('sales')"><i class="fa fa-download"></i> CSV</button><button class="btn btn-success btn-xs" onclick="exportReportExcel('sales')"><i class="fa fa-file-excel"></i> Excel</button></div></div>
+        <div class="card-header"><div class="card-title">Invoice / Sales Summary</div><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="exportReportCSV('sales')"><i class="fa fa-download"></i> CSV</button><button class="btn btn-success btn-xs" onclick="exportReportExcel('sales')"><i class="fa fa-file-excel"></i> Excel</button><button class="btn btn-danger btn-xs" onclick="exportReportPDF('sales')"><i class="fa fa-file-pdf"></i> PDF</button><button class="btn btn-outline btn-xs" onclick="printReport('sales')"><i class="fa fa-print"></i> Print</button></div></div>
         <div id="salesSummary" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:4px"></div>
       </div>
     </div>
@@ -1815,7 +1826,10 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="custSearch" placeholder="Search customers..." oninput="window.biz && window.biz.filterCustomers()"/></div>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openCustomerModal()"><i class="fa fa-plus"></i> Add Customer</button>
-        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportCustomersExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-success btn-sm" onclick="exportCustomersExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="exportCustomersCSV()"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="exportCustomersPDF()"><i class="fa fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="printCustomersTable()"><i class="fa fa-print"></i> Print</button>
         <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterCustomers()"><i class="fa fa-sync"></i> Refresh</button>
       </div>
       <div class="table-wrap">
@@ -1836,7 +1850,10 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="supSearch" placeholder="Search suppliers..." oninput="window.biz && window.biz.filterSuppliers()"/></div>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openSupplierModal()"><i class="fa fa-plus"></i> Add Supplier</button>
-        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportSuppliersExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-success btn-sm" onclick="exportSuppliersExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="exportSuppliersCSV()"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="exportSuppliersPDF()"><i class="fa fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="printSuppliersTable()"><i class="fa fa-print"></i> Print</button>
         <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterSuppliers()"><i class="fa fa-sync"></i> Refresh</button>
       </div>
       <div class="table-wrap">
@@ -1860,8 +1877,10 @@ input[title]:hover::before,select[title]:hover::before{display:none}
           <option value="">All Months</option>
         </select>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openExpenseModal()"><i class="fa fa-plus"></i> Record Expense</button>
-        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.exportExpensesCSV()"><i class="fa fa-file-csv"></i> CSV</button>
-        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportExpensesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-success btn-sm" onclick="exportExpensesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="exportExpensesCSV()"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="exportExpensesPDF()"><i class="fa fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="printExpensesTable()"><i class="fa fa-print"></i> Print</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -1881,7 +1900,10 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="purSearch" placeholder="Search purchase orders..." oninput="window.biz && window.biz.filterPurchases()"/></div>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openPurchaseModal()"><i class="fa fa-plus"></i> New Purchase Order</button>
-        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportPurchasesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-success btn-sm" onclick="exportPurchasesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="exportPurchasesCSV()"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="exportPurchasesPDF()"><i class="fa fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="printPurchasesTable()"><i class="fa fa-print"></i> Print</button>
         <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterPurchases()"><i class="fa fa-sync"></i> Refresh</button>
       </div>
       <div class="table-wrap">
@@ -1902,7 +1924,10 @@ input[title]:hover::before,select[title]:hover::before{display:none}
       <div class="section-controls">
         <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="empSearch" placeholder="Search employees..." oninput="window.biz && window.biz.filterEmployees()"/></div>
         <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.openEmployeeModal()"><i class="fa fa-plus"></i> Add Employee</button>
-        <button class="btn btn-success btn-sm" onclick="window.biz && window.biz.exportEmployeesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-success btn-sm" onclick="exportEmployeesExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="exportEmployeesCSV()"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="exportEmployeesPDF()"><i class="fa fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="printEmployeesTable()"><i class="fa fa-print"></i> Print</button>
         <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterEmployees()"><i class="fa fa-sync"></i> Refresh</button>
       </div>
       <div class="table-wrap">

@@ -176,6 +176,91 @@ window.exportReportExcel = function(type) {
   window.exportToExcel(headers, rows, sheetName, filename);
 };
 
+window.exportReportPDF = function(type) {
+  const now = new Date().toLocaleDateString('en-KE').replace(/\//g,'-');
+  let headers, rows, filename, title;
+
+  if (type === 'out') {
+    const data = window.parts.filter(p => (p.stock||0) === 0);
+    if (!data.length) { window.showToast('No out-of-stock items to export', 'warn'); return; }
+    title = 'Out of Stock Parts';
+    headers = ['SKU / Part Number','Description','Category','Min Stock Required','Supplier','Location'];
+    rows = data.map(p => [
+      p.partNum||p.part_num||'', p.desc||p.description||'',
+      p.category||'', p.minStock||p.min_stock||1,
+      p.supplier||'', p.location||''
+    ]);
+    filename = `Printex_OutOfStock_${now}.pdf`;
+  } else if (type === 'low') {
+    const data = window.parts.filter(p => (p.stock||0) > 0 && (p.stock||0) <= (p.minStock||p.min_stock||1));
+    if (!data.length) { window.showToast('No low-stock items to export', 'warn'); return; }
+    title = 'Low Stock Parts';
+    headers = ['SKU / Part Number','Description','Category','Current Stock','Min Stock','Price (KSH)','Supplier'];
+    rows = data.map(p => [
+      p.partNum||p.part_num||'', p.desc||p.description||'',
+      p.category||'', p.stock||0, p.minStock||p.min_stock||1,
+      Number(p.priceKsh||p.price_ksh||0), p.supplier||''
+    ]);
+    filename = `Printex_LowStock_${now}.pdf`;
+  } else {
+    if (!window.invoices.length) { window.showToast('No invoices to export', 'warn'); return; }
+    title = 'Invoice / Sales Summary';
+    headers = ['Invoice Number','Date','Customer','No. of Items','Subtotal (KSH)','VAT (KSH)','Grand Total (KSH)','Type','Status'];
+    rows = window.invoices.map(i => [
+      i.invoiceNumber||'', i.date||'', i.customer||'',
+      (i.items||[]).length,
+      Math.round(i.subtotal||0),
+      Math.round(i.vat||0),
+      Math.round(i.grand||0),
+      i.type||'invoice',
+      i.paymentStatus||i.status||'draft'
+    ]);
+    filename = `Printex_Sales_${now}.pdf`;
+  }
+
+  window.exportTableToPDF(title, headers, rows, filename);
+};
+
+window.printReport = function(type) {
+  let title, headers, rows;
+
+  if (type === 'out') {
+    const data = window.parts.filter(p => (p.stock||0) === 0);
+    if (!data.length) { window.showToast('No out-of-stock items to print', 'warn'); return; }
+    title = 'Out of Stock Parts';
+    headers = ['SKU / Part Number','Description','Category','Min Stock','Supplier','Location'];
+    rows = data.map(p => [
+      p.partNum||p.part_num||'', p.desc||p.description||'',
+      p.category||'', p.minStock||p.min_stock||1,
+      p.supplier||'', p.location||''
+    ]);
+  } else if (type === 'low') {
+    const data = window.parts.filter(p => (p.stock||0) > 0 && (p.stock||0) <= (p.minStock||p.min_stock||1));
+    if (!data.length) { window.showToast('No low-stock items to print', 'warn'); return; }
+    title = 'Low Stock Parts';
+    headers = ['SKU / Part Number','Description','Category','Current Stock','Min Stock','Price (KSH)','Supplier'];
+    rows = data.map(p => [
+      p.partNum||p.part_num||'', p.desc||p.description||'',
+      p.category||'', p.stock||0, p.minStock||p.min_stock||1,
+      Number(p.priceKsh||p.price_ksh||0), p.supplier||''
+    ]);
+  } else {
+    if (!window.invoices.length) { window.showToast('No invoices to print', 'warn'); return; }
+    title = 'Invoice / Sales Summary';
+    headers = ['Invoice Number','Date','Customer','Subtotal (KSH)', 'VAT (KSH)', 'Grand Total (KSH)', 'Type', 'Status'];
+    rows = window.invoices.map(i => [
+      i.invoiceNumber||'', i.date||'', i.customer||'',
+      Math.round(i.subtotal||0),
+      Math.round(i.vat||0),
+      Math.round(i.grand||0),
+      i.type||'invoice',
+      i.paymentStatus||i.status||'draft'
+    ]);
+  }
+
+  window.printTableDataset(title, headers, rows);
+};
+
 window.downloadFile = function(content, filename, mime) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
