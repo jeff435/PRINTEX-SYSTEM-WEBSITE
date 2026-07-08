@@ -693,27 +693,32 @@
   }
 
   async function deleteRecord(store, id) {
-    if (!confirm('Delete this record permanently?')) return;
     const arr = getArr(store);
     const item = arr.find(x=>x.id===id);
-    if (item) {
-      item._deleted = true;
-      try {
-        await window.dbPut(store, item);
-        // If categories changed, refresh global window.categories and update all dropdowns
-        if (store === 'categories') {
-          categories = (await window.dbGet('categories')) || [];
-          window.categories = categories.filter(c => !c._deleted);
-          if (typeof window.populateCategorySelects === 'function') {
-            window.populateCategorySelects();
-          }
+    // Build a friendly name for the confirmation dialog
+    const itemName = item ? (item.name || item.description || item.poNumber || item.employee_name || id) : id;
+    const storeLabel = store.charAt(0).toUpperCase() + store.slice(1, -1); // e.g. 'Categorie' → strip trailing 's' → 'Categori', adjust:
+    const labelMap = { categories:'Category', customers:'Customer', suppliers:'Supplier', expenses:'Expense', employees:'Employee', purchases:'Purchase Order', attendance:'Attendance Record' };
+    const label = labelMap[store] || storeLabel;
+    if (!confirm(`Delete ${label}:\n\n"${itemName}"\n\nThis cannot be undone. Continue?`)) return;
+    if (!item) { window.showToast && window.showToast('Record not found.', 'warn'); return; }
+    item._deleted = true;
+    try {
+      await window.dbPut(store, item);
+      // If categories changed, refresh global window.categories and update all dropdowns
+      if (store === 'categories') {
+        categories = (await window.dbGet('categories')) || [];
+        window.categories = categories.filter(c => !c._deleted);
+        if (typeof window.populateCategorySelects === 'function') {
+          window.populateCategorySelects();
         }
-        refreshPage(store);
-        window.showToast && window.showToast('🗑️ Deleted.', 'success');
-        window.syncData && window.syncData();
-      } catch(e) {
-        window.showToast && window.showToast('❌ Delete failed.', 'danger');
       }
+      refreshPage(store);
+      window.showToast && window.showToast(`🗑️ ${label} deleted.`, 'success');
+      window.syncData && window.syncData();
+    } catch(e) {
+      item._deleted = false; // rollback
+      window.showToast && window.showToast('❌ Delete failed: ' + e.message, 'danger');
     }
   }
 
@@ -1161,11 +1166,25 @@
     filterCategories: () => loadAndRender('categories', renderCategories),
     openCategoryModal: () => openCategoryModal(),
     editCategory: id => openCategoryModal(id),
+    refreshCategories: () => loadAndRender('categories', renderCategories),
     // Purchases
     filterPurchases: () => loadAndRender('purchases', renderPurchases),
     openPurchaseModal: () => openPurchaseModal(),
     editPurchase: id => openPurchaseModal(id),
     exportPurchasesExcel,
+    // Attendance
+    filterAttendance: () => { loadAll().then(renderAttendance); },
+    renderAttendance,
+    markAttendance,
+    updateAttendanceNotes,
+    saveDailyAttendance,
+    exportAttendanceCSV,
+    exportAttendanceExcel,
+    // User Management
+    filterUsers: () => renderUsers(),
+    loadUsers,
+    changeUserRole,
+    deleteUser,
     // Common
     saveRecord,
     deleteRecord

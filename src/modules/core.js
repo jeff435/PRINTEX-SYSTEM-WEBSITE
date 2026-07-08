@@ -1743,6 +1743,8 @@ window.showPage = function(id, navEl) {
   if (id==='purchases' && window.biz && typeof window.biz.filterPurchases === 'function') window.biz.filterPurchases();
   if (id==='employees' && window.biz && typeof window.biz.filterEmployees === 'function') window.biz.filterEmployees();
   if (id==='categories' && window.biz && typeof window.biz.filterCategories === 'function') window.biz.filterCategories();
+  if (id==='attendance' && window.biz && typeof window.biz.filterAttendance === 'function') window.biz.filterAttendance();
+  if (id==='users' && window.biz && typeof window.biz.loadUsers === 'function') window.biz.loadUsers();
 };
 
 window.toggleSidebar = function() {

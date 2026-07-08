@@ -1254,6 +1254,24 @@ app.put("/api/users/:id/role", authenticate, async (req, res) => {
   }
 });
 
+app.delete("/api/users/:id", authenticate, async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== "admin") {
+    return res.status(403).json({ error: "Access denied: Admins only" });
+  }
+  const { id } = req.params;
+  // Prevent self-deletion
+  if (String(id) === String(user.id)) {
+    return res.status(400).json({ error: "You cannot delete your own account." });
+  }
+  try {
+    await query("DELETE FROM users WHERE id = $1", [id]);
+    res.json({ success: true, deletedUserId: id });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to delete user: " + e.message });
+  }
+});
+
 // ─── Catch-all API 404 ────────────────────────────────────────────
 app.all("/api/*", (req, res) => {
   res.status(404).json({ error: `API route ${req.method} ${req.url} not found.` });
