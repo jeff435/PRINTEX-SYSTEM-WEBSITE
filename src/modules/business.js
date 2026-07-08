@@ -675,13 +675,16 @@
 
       const modalId = { customers:'custModal', suppliers:'supModal', expenses:'expModal', employees:'empModal', categories:'catMgmtModal', purchases:'purModal' }[store];
       closeModal(modalId);
-      // If categories changed, refresh global window.categories and update all dropdowns
+      // If categories changed, refresh global window.categories and update all dropdowns + charts
       if (store === 'categories') {
         categories = (await window.dbGet('categories')) || [];
         window.categories = categories.filter(c => !c._deleted);
         if (typeof window.populateCategorySelects === 'function') {
-          window.populateCategorySelects();
+          window.populateCategorySelects(); // updates fCat, catFilter, any data-category-select, and inventory chart
         }
+        // Also refresh inventory chart and dashboard KPIs
+        if (typeof window.renderInventory === 'function') window.renderInventory();
+        if (typeof window.renderDashboard === 'function') window.renderDashboard();
       }
       refreshPage(store);
       window.showToast && window.showToast('✅ Saved successfully!', 'success');
@@ -705,13 +708,16 @@
     item._deleted = true;
     try {
       await window.dbPut(store, item);
-      // If categories changed, refresh global window.categories and update all dropdowns
+      // If categories changed, refresh global window.categories and update all dropdowns + charts
       if (store === 'categories') {
         categories = (await window.dbGet('categories')) || [];
         window.categories = categories.filter(c => !c._deleted);
         if (typeof window.populateCategorySelects === 'function') {
-          window.populateCategorySelects();
+          window.populateCategorySelects(); // updates fCat, catFilter, inventory chart
         }
+        // Also refresh inventory chart and dashboard KPIs
+        if (typeof window.renderInventory === 'function') window.renderInventory();
+        if (typeof window.renderDashboard === 'function') window.renderDashboard();
       }
       refreshPage(store);
       window.showToast && window.showToast(`🗑️ ${label} deleted.`, 'success');

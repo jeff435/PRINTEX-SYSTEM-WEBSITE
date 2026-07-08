@@ -840,7 +840,7 @@ window.initializeFirestoreListeners = async function(userId) {
     } else if (store === 'submissions') {
       window.submissions = mergedData;
       if (typeof window.renderFreelancePage === 'function') window.renderFreelancePage();
-    } else if (['customers', 'suppliers', 'expenses', 'employees', 'categories', 'purchases'].includes(store)) {
+    } else if (['customers', 'suppliers', 'expenses', 'employees', 'categories', 'purchases', 'attendance'].includes(store)) {
       window[store] = mergedData;
       
       // Special logic for categories: update dynamic select options across the app
@@ -854,6 +854,8 @@ window.initializeFirestoreListeners = async function(userId) {
           if (typeof window.populateCategorySelects === 'function') {
             window.populateCategorySelects();
           }
+          // Refresh inventory chart so stock-by-category bar is up to date
+          if (typeof window.renderInventory === 'function') window.renderInventory();
         }
       }
       
@@ -863,9 +865,14 @@ window.initializeFirestoreListeners = async function(userId) {
           // If current active page is the updated store, refresh it
           const currentActivePage = document.querySelector('.page.active')?.id?.replace('page-', '');
           if (currentActivePage === store) {
-            const renderFnName = 'filter' + store.charAt(0).toUpperCase() + store.slice(1);
-            if (typeof window.biz[renderFnName] === 'function') {
-              window.biz[renderFnName]();
+            // attendance uses filterAttendance, users uses loadUsers — handle both
+            if (store === 'attendance' && typeof window.biz.filterAttendance === 'function') {
+              window.biz.filterAttendance();
+            } else {
+              const renderFnName = 'filter' + store.charAt(0).toUpperCase() + store.slice(1);
+              if (typeof window.biz[renderFnName] === 'function') {
+                window.biz[renderFnName]();
+              }
             }
           }
         });
@@ -1974,25 +1981,38 @@ window.seedDefaultParts = async function() {
 };
 
 window.populateCategorySelects = function() {
-  const cats = window.categories || [];
-  
+  const cats = (window.categories || []).filter(c => !c._deleted);
+  const optionsHtml = cats.map(c =>
+    `<option value="${window.esc(c.code || c.name)}">${window.esc(c.code || c.name)} – ${window.esc(c.name)}</option>`
+  ).join('') || '<option value="">No categories defined</option>';
+
   // 1. Update fCat (Part Modal dropdown)
   const fCatSelect = document.getElementById('fCat');
   if (fCatSelect) {
-    fCatSelect.innerHTML = cats.map(c => 
-      `<option value="${window.esc(c.code || c.name)}">${window.esc(c.code || c.name)} – ${window.esc(c.name)}</option>`
-    ).join('') || '<option value="">No categories defined</option>';
+    const prev = fCatSelect.value;
+    fCatSelect.innerHTML = optionsHtml;
+    if (prev) fCatSelect.value = prev; // restore selection if still valid
   }
 
   // 2. Update catFilter (Inventory page filter dropdown)
   const catFilterSelect = document.getElementById('catFilter');
   if (catFilterSelect) {
     const currentValue = catFilterSelect.value;
-    catFilterSelect.innerHTML = '<option value="">All Categories</option>' + 
-      cats.map(c => 
-        `<option value="${window.esc(c.code || c.name)}">${window.esc(c.code || c.name)} – ${window.esc(c.name)}</option>`
-      ).join('');
+    catFilterSelect.innerHTML = '<option value="">All Categories</option>' + optionsHtml;
     catFilterSelect.value = currentValue; // restore selected value
+  }
+
+  // 3. Update any other selects with data-category-select attribute
+  document.querySelectorAll('[data-category-select]').forEach(sel => {
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">All Categories</option>' + optionsHtml;
+    if (prev) sel.value = prev;
+  });
+
+  // 4. Refresh inventory chart so stock-by-category bar reflects new categories
+  const invPage = document.getElementById('page-inventory');
+  if (invPage && invPage.classList.contains('active') && typeof window.renderInventory === 'function') {
+    window.renderInventory();
   }
 };
 
