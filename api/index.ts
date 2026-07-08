@@ -160,6 +160,17 @@ if (pool) {
           new_data TEXT,
           timestamp INTEGER DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS attendance (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          employee_id TEXT NOT NULL,
+          employee_name TEXT,
+          date TEXT NOT NULL,
+          status TEXT DEFAULT 'present',
+          notes TEXT,
+          created_at TEXT,
+          updated_at INTEGER DEFAULT 0
+        );
       `);
 
       // Alter columns safely
@@ -900,10 +911,11 @@ app.post("/api/sync/push", authenticate, async (req, res) => {
   const userId = (req as any).user.id;
   const { 
     parts, invoices, settings, activity, submissions,
-    categories, customers, suppliers, expenses, employees, purchases 
+    categories, customers, suppliers, expenses, employees, purchases,
+    attendance
   } = req.body;
   const now = Date.now();
-  console.log(`[Sync Push] user=${userId} parts=${parts?.length || 0} invoices=${invoices?.length || 0} submissions=${submissions?.length || 0}`);
+  console.log(`[Sync Push] user=${userId} parts=${parts?.length || 0} invoices=${invoices?.length || 0} submissions=${submissions?.length || 0} attendance=${attendance?.length || 0}`);
 
   try {
     // 1. Sync Parts (inventory)
@@ -1080,6 +1092,18 @@ app.post("/api/sync/push", authenticate, async (req, res) => {
       }
     }
 
+    // 12. Sync Attendance
+    if (attendance && Array.isArray(attendance)) {
+      for (const att of attendance) {
+        await query(
+          `INSERT INTO attendance (id, user_id, employee_id, employee_name, date, status, notes, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT(id) DO UPDATE SET employee_id=$3, employee_name=$4, date=$5, status=$6, notes=$7, updated_at=$9`,
+          [String(att.id), userId, att.employee_id || att.employeeId || '', att.employee_name || att.employeeName || '', att.date || '', att.status || 'present', att.notes || '', att.created_at || new Date().toISOString(), now]
+        );
+      }
+    }
+
     console.log(`[Sync Push] Success for user=${userId} at ${now}`);
     res.json({ success: true, timestamp: now });
   } catch (e: any) {
@@ -1114,6 +1138,7 @@ app.post("/api/sync/pull", authenticate, async (req, res) => {
     const expensesResult = await query("SELECT * FROM expenses WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
     const employeesResult = await query("SELECT * FROM employees WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
     const purchasesResult = await query("SELECT * FROM purchases WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
+    const attendanceResult = await query("SELECT * FROM attendance WHERE user_id = $1 AND updated_at > $2", [userId, lastSyncTimestamp]);
 
     res.json({
       uidValidity: {
@@ -1127,7 +1152,8 @@ app.post("/api/sync/pull", authenticate, async (req, res) => {
         suppliers: 20260608,
         expenses: 20260608,
         employees: 20260608,
-        purchases: 20260608
+        purchases: 20260608,
+        attendance: 20260608
       },
       parts: partsResult.rows.map((r) => ({
         id: r.id, category: r.category, categoryId: r.category_id, partNum: r.part_num, desc: r.description,
@@ -1152,7 +1178,8 @@ app.post("/api/sync/pull", authenticate, async (req, res) => {
       suppliers: suppliersResult.rows,
       expenses: expensesResult.rows,
       employees: employeesResult.rows,
-      purchases: purchasesResult.rows
+      purchases: purchasesResult.rows,
+      attendance: attendanceResult.rows
     });
   } catch (e: any) {
     console.error("[Sync Pull] Error:", e);
@@ -1169,7 +1196,7 @@ app.post("/api/sync/delete", authenticate, async (req, res) => {
 
   try {
     const table = store === "parts" ? "inventory" : store;
-    const allowedTables = ['inventory', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases'];
+    const allowedTables = ['inventory', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases', 'attendance'];
     if (!allowedTables.includes(table)) {
       return res.status(400).json({ error: "Invalid store: " + store });
     }
@@ -1192,6 +1219,38 @@ app.post("/api/sync/delete", authenticate, async (req, res) => {
   } catch (e: any) {
     console.error("[Sync Delete] Error:", e);
     res.status(500).json({ error: "Failed to delete item: " + e.message });
+  }
+});
+
+// ─── Users API (Admins Only) ──────────────────────────────────────
+app.get("/api/users", authenticate, async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== "admin") {
+    return res.status(403).json({ error: "Access denied: Admins only" });
+  }
+  try {
+    const result = await query("SELECT id, fullName, email, role, created_at FROM users ORDER BY created_at DESC");
+    res.json(result.rows);
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to fetch users: " + e.message });
+  }
+});
+
+app.put("/api/users/:id/role", authenticate, async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== "admin") {
+    return res.status(403).json({ error: "Access denied: Admins only" });
+  }
+  const { id } = req.params;
+  const { role } = req.body;
+  if (role !== "admin" && role !== "user") {
+    return res.status(400).json({ error: "Invalid role. Must be 'admin' or 'user'" });
+  }
+  try {
+    await query("UPDATE users SET role = $1 WHERE id = $2", [role, id]);
+    res.json({ success: true, userId: id, role });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to update user role: " + e.message });
   }
 });
 

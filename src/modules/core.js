@@ -75,6 +75,7 @@ window.suppliers = [];
 window.expenses = [];
 window.employees = [];
 window.purchases = [];
+window.attendance = [];
 
 window.DEFAULT_CATEGORIES = [
   { name: 'Valves & Pneumatic Parts', code: 'A', icon: '🔧', color: '#ff6b6b' },
@@ -106,7 +107,7 @@ window.tabSessionId = 'tab_' + Math.random().toString(36).substring(2, 9);
 // ── INDEXEDDB SETUP ──────────────────────────────────────────────
 window.openDB = function() {
   return new Promise((res, rej) => {
-    const req = indexedDB.open('PrintexDB', 5);
+    const req = indexedDB.open('PrintexDB', 6);
     req.onupgradeneeded = e => {
       const d = e.target.result;
       if (!d.objectStoreNames.contains('parts')) d.createObjectStore('parts', {keyPath:'id'});
@@ -121,6 +122,8 @@ window.openDB = function() {
       if (!d.objectStoreNames.contains('expenses')) d.createObjectStore('expenses', {keyPath:'id'});
       if (!d.objectStoreNames.contains('employees')) d.createObjectStore('employees', {keyPath:'id'});
       if (!d.objectStoreNames.contains('purchases')) d.createObjectStore('purchases', {keyPath:'id'});
+      // v6: Attendance store
+      if (!d.objectStoreNames.contains('attendance')) d.createObjectStore('attendance', {keyPath:'id'});
     };
     req.onsuccess = e => { window.db = e.target.result; res(window.db); };
     req.onerror = () => rej(req.error);
@@ -269,6 +272,9 @@ window.dbPut = function(store, value) {
     else value.id = String(value.id);
   } else if (store === 'purchases') {
     if (!value.id) value.id = 'pur_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+    else value.id = String(value.id);
+  } else if (store === 'attendance') {
+    if (!value.id) value.id = 'att_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
     else value.id = String(value.id);
   }
 
@@ -922,7 +928,8 @@ window.initializeFirestoreListeners = async function(userId) {
     migrateOwnerId('expenses'),
     migrateOwnerId('employees'),
     migrateOwnerId('categories'),
-    migrateOwnerId('purchases')
+    migrateOwnerId('purchases'),
+    migrateOwnerId('attendance')
   ]).then(() => {
     console.log('[Migration] All ownerId background migrations completed.');
   }).catch(e => {
@@ -1096,6 +1103,21 @@ window.initializeFirestoreListeners = async function(userId) {
     window.updateSyncStatus('offline');
   });
   firestoreListeners.push(purchasesUnsub);
+
+  // 12. Listen to attendance
+  const attendanceUnsub = window.fDb.collection(`users/${userId}/attendance`).onSnapshot(snapshot => {
+    const docs = [];
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      d.id = doc.id;
+      docs.push(d);
+    });
+    updateAndRender('attendance', docs);
+  }, err => {
+    console.error("Attendance sync error:", err);
+    window.updateSyncStatus('offline');
+  });
+  firestoreListeners.push(attendanceUnsub);
 };
 
 // Spinner helpers

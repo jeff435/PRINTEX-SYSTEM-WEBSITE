@@ -279,6 +279,17 @@ async function startServer() {
         new_data TEXT,
         timestamp INTEGER DEFAULT 0
       );
+      CREATE TABLE IF NOT EXISTS attendance (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        employee_name TEXT,
+        date TEXT NOT NULL,
+        status TEXT DEFAULT 'present',
+        notes TEXT,
+        created_at TEXT,
+        updated_at INTEGER DEFAULT 0
+      );
     `;
     
     // SQLite executes init script directly

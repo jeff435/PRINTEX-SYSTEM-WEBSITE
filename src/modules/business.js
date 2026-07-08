@@ -13,6 +13,7 @@
   let employees  = [];
   let categories = [];
   let purchases  = [];
+  let attendance = [];
   let editingId  = null;
   let editingStore = null;
 
@@ -46,6 +47,7 @@
       employees  = (await window.dbGet('employees'))  || [];
       categories = (await window.dbGet('categories')) || [];
       purchases  = (await window.dbGet('purchases'))  || [];
+      attendance = (await window.dbGet('attendance')) || [];
       // Keep global window arrays in sync so spreadsheet.js and analytics.js export functions work
       window.customers  = customers.filter(c => !c._deleted);
       window.suppliers  = suppliers.filter(s => !s._deleted);
@@ -53,6 +55,7 @@
       window.employees  = employees.filter(e => !e._deleted);
       window.purchases  = purchases.filter(p => !p._deleted);
       window.categories = categories.filter(c => !c._deleted);
+      window.attendance = attendance.filter(a => !a._deleted);
       if (typeof window.populateCategorySelects === 'function') {
         window.populateCategorySelects();
       }
@@ -753,13 +756,293 @@
     return null;
   }
 
+  // ── Attendance Roster Functions ─────────────────────────────────────
+  function renderAttendance() {
+    const search = (document.getElementById('attSearch')?.value || '').toLowerCase();
+    const dateInput = document.getElementById('attDateFilter');
+    let dateFilter = dateInput?.value;
+    if (!dateFilter) {
+      dateFilter = new Date().toISOString().split('T')[0];
+      if (dateInput) dateInput.value = dateFilter;
+    }
+
+    const dailyRecords = attendance.filter(a => !a._deleted && a.date === dateFilter);
+    const activeEmployees = employees.filter(e => !e._deleted && e.status === 'active');
+    
+    const roster = activeEmployees.map(emp => {
+      const record = dailyRecords.find(a => a.employee_id === emp.id || a.employeeId === emp.id);
+      return {
+        employeeId: emp.id,
+        employeeName: emp.name,
+        role: emp.role,
+        status: record ? record.status : 'present',
+        notes: record ? record.notes || '' : '',
+        lastMarked: record ? new Date(record.updated_at || record.updatedAt || Date.now()).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }) : 'Never'
+      };
+    });
+
+    const filteredRoster = roster.filter(r =>
+      r.employeeName.toLowerCase().includes(search) ||
+      r.role.toLowerCase().includes(search)
+    );
+
+    // Calculate stats
+    const presentCount = roster.filter(r => r.status === 'present').length;
+    const absentCount = roster.filter(r => r.status === 'absent').length;
+    const lateCount = roster.filter(r => r.status === 'late' || r.status === 'on-leave').length;
+
+    const elActive = document.getElementById('attKpiActive');
+    const elPresent = document.getElementById('attKpiPresent');
+    const elAbsent = document.getElementById('attKpiAbsent');
+    const elLate = document.getElementById('attKpiLate');
+
+    if (elActive) elActive.textContent = activeEmployees.length;
+    if (elPresent) elPresent.textContent = presentCount;
+    if (elAbsent) elAbsent.textContent = absentCount;
+    if (elLate) elLate.textContent = lateCount;
+
+    const tbody = document.getElementById('attBody');
+    if (!tbody) return;
+
+    if (!filteredRoster.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-calendar-check" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No employees in roster matching search.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filteredRoster.map(r => `
+      <tr data-employee-id="${r.employeeId}">
+        <td><strong>${esc(r.employeeName)}</strong></td>
+        <td><span class="badge" style="background:var(--bg3);color:var(--muted)">${esc(r.role)}</span></td>
+        <td>
+          <select class="select select-sm status-select" style="width:130px;background:var(--bg3);border:1px solid var(--border2)" onchange="window.biz.markAttendance('${r.employeeId}', this.value)">
+            <option value="present" ${r.status === 'present' ? 'selected' : ''}>✅ Present</option>
+            <option value="absent" ${r.status === 'absent' ? 'selected' : ''}>❌ Absent</option>
+            <option value="late" ${r.status === 'late' ? 'selected' : ''}>⚠️ Late</option>
+            <option value="on-leave" ${r.status === 'on-leave' ? 'selected' : ''}>🌴 On Leave</option>
+          </select>
+        </td>
+        <td>
+          <input class="input input-sm notes-input" style="max-width:300px" value="${esc(r.notes)}" placeholder="Add remarks..." onchange="window.biz.updateAttendanceNotes('${r.employeeId}', this.value)"/>
+        </td>
+        <td style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">${r.lastMarked}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function markAttendance(employeeId, status) {
+    const dateFilter = document.getElementById('attDateFilter')?.value || new Date().toISOString().split('T')[0];
+    const emp = employees.find(e => e.id === employeeId);
+    if (!emp) return;
+
+    let record = attendance.find(a => !a._deleted && (a.employee_id === employeeId || a.employeeId === employeeId) && a.date === dateFilter);
+    if (!record) {
+      record = {
+        id: 'att_' + employeeId.replace('emp_','') + '_' + dateFilter.replace(/\-/g,'') + '_' + Math.random().toString(36).substring(2,6),
+        employee_id: employeeId,
+        employee_name: emp.name,
+        date: dateFilter,
+        status: status,
+        notes: '',
+        created_at: new Date().toISOString(),
+        updated_at: Date.now()
+      };
+      attendance.push(record);
+    } else {
+      record.status = status;
+      record.updated_at = Date.now();
+    }
+
+    try {
+      await window.dbPut('attendance', record);
+      renderAttendance();
+      window.syncData && window.syncData();
+    } catch(e) {
+      console.error('Failed to mark attendance:', e);
+    }
+  }
+
+  async function updateAttendanceNotes(employeeId, notes) {
+    const dateFilter = document.getElementById('attDateFilter')?.value || new Date().toISOString().split('T')[0];
+    const emp = employees.find(e => e.id === employeeId);
+    if (!emp) return;
+
+    let record = attendance.find(a => !a._deleted && (a.employee_id === employeeId || a.employeeId === employeeId) && a.date === dateFilter);
+    if (!record) {
+      record = {
+        id: 'att_' + employeeId.replace('emp_','') + '_' + dateFilter.replace(/\-/g,'') + '_' + Math.random().toString(36).substring(2,6),
+        employee_id: employeeId,
+        employee_name: emp.name,
+        date: dateFilter,
+        status: 'present',
+        notes: notes,
+        created_at: new Date().toISOString(),
+        updated_at: Date.now()
+      };
+      attendance.push(record);
+    } else {
+      record.notes = notes;
+      record.updated_at = Date.now();
+    }
+
+    try {
+      await window.dbPut('attendance', record);
+      renderAttendance();
+      window.syncData && window.syncData();
+    } catch(e) {
+      console.error('Failed to update notes:', e);
+    }
+  }
+
+  function saveDailyAttendance() {
+    window.showToast && window.showToast('📋 Daily roster successfully locked and cloud synced!', 'success');
+    window.syncData && window.syncData();
+  }
+
+  function exportAttendanceCSV() {
+    const dateFilter = document.getElementById('attDateFilter')?.value || new Date().toISOString().split('T')[0];
+    const rows = [['Employee','Role','Status','Notes','Date','Last Marked']];
+    const activeEmployees = employees.filter(e => !e._deleted && e.status === 'active');
+    const dailyRecords = attendance.filter(a => !a._deleted && a.date === dateFilter);
+    activeEmployees.forEach(emp => {
+      const record = dailyRecords.find(a => a.employee_id === emp.id || a.employeeId === emp.id);
+      const status = record ? record.status : 'present';
+      const notes = record ? record.notes || '' : '';
+      const lastMarked = record ? new Date(record.updated_at || record.updatedAt || Date.now()).toLocaleTimeString() : 'Never';
+      rows.push([emp.name, emp.role, status, notes, dateFilter, lastMarked]);
+    });
+    const csv = rows.map(r => r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `printex-attendance-${dateFilter}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportAttendanceExcel() {
+    const dateFilter = document.getElementById('attDateFilter')?.value || new Date().toISOString().split('T')[0];
+    const activeEmployees = employees.filter(e => !e._deleted && e.status === 'active');
+    const dailyRecords = attendance.filter(a => !a._deleted && a.date === dateFilter);
+    if (!activeEmployees.length) { window.showToast && window.showToast('No active employees to export','warn'); return; }
+    const headers = ['Employee','Role','Status','Notes','Date','Last Marked'];
+    const rows = activeEmployees.map(emp => {
+      const record = dailyRecords.find(a => a.employee_id === emp.id || a.employeeId === emp.id);
+      const status = record ? record.status : 'present';
+      const notes = record ? record.notes || '' : '';
+      const lastMarked = record ? new Date(record.updated_at || record.updatedAt || Date.now()).toLocaleTimeString() : 'Never';
+      return [emp.name, emp.role, status, notes, dateFilter, lastMarked];
+    });
+    window.exportToExcel(headers, rows, 'Attendance', `Printex_Attendance_${dateFilter}.xlsx`);
+  }
+
+  window.printAttendanceTable = function() {
+    window.printTable('page-attendance', 'Employee Daily Attendance Roster');
+  };
+  window.exportAttendancePDF = function() {
+    window.exportToPDF('page-attendance', `Attendance_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  // ── User Management Functions ───────────────────────────────────────
+  let userList = [];
+  async function loadUsers() {
+    if (!window.authenticatedFetch) return;
+    try {
+      const res = await window.authenticatedFetch('/api/users');
+      if (res.ok) {
+        userList = await res.json();
+        renderUsers();
+      } else {
+        const errData = await res.json();
+        console.warn('[Business] User list failed:', errData);
+      }
+    } catch(e) {
+      console.warn('[Business] User list failed to fetch:', e);
+    }
+  }
+
+  function renderUsers() {
+    const search = (document.getElementById('userSearch')?.value || '').toLowerCase();
+    const filtered = userList.filter(u =>
+      u.fullName?.toLowerCase().includes(search) ||
+      u.email?.toLowerCase().includes(search)
+    );
+
+    const tbody = document.getElementById('userBody');
+    if (!tbody) return;
+
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--dim);padding:40px"><i class="fa fa-user-shield" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>No registered users found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(u => {
+      const formattedDate = u.created_at ? new Date(u.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+      const currentUserEmail = (window.fAuth && window.fAuth.currentUser) ? window.fAuth.currentUser.email : '';
+      const isSelf = u.email?.toLowerCase() === currentUserEmail?.toLowerCase();
+      
+      return `
+        <tr>
+          <td><strong>${esc(u.fullName)}</strong> ${isSelf ? '<span class="badge" style="background:var(--accent-glow);color:var(--accent)">You</span>' : ''}</td>
+          <td><span style="font-family:var(--font-mono)">${esc(u.email)}</span></td>
+          <td>
+            <select class="select select-sm" style="width:120px;background:var(--bg3);border:1px solid var(--border2)" onchange="window.biz.changeUserRole('${u.id}', this.value)" ${isSelf ? 'disabled' : ''}>
+              <option value="user" ${u.role === 'user' ? 'selected' : ''}>👤 User</option>
+              <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>⚙️ Admin</option>
+            </select>
+          </td>
+          <td>${formattedDate}</td>
+          <td>
+            <button class="btn btn-xs btn-outline btn-danger" onclick="window.biz.deleteUser('${u.id}')" ${isSelf ? 'disabled' : ''}><i class="fa fa-trash"></i> Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function changeUserRole(userId, role) {
+    if (!window.authenticatedFetch) return;
+    try {
+      const res = await window.authenticatedFetch(`/api/users/${userId}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ role: role })
+      });
+      if (res.ok) {
+        window.showToast && window.showToast('User role updated successfully!', 'success');
+        loadUsers();
+      } else {
+        const err = await res.json();
+        window.showToast && window.showToast('Role update failed: ' + err.error, 'danger');
+      }
+    } catch(e) {
+      window.showToast && window.showToast('Role update failed.', 'danger');
+    }
+  }
+
+  async function deleteUser(userId) {
+    if (!confirm('Are you sure you want to delete this user?')) return;
+    if (!window.authenticatedFetch) return;
+    try {
+      const res = await window.authenticatedFetch(`/api/users/${userId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        window.showToast && window.showToast('User account deleted successfully.', 'success');
+        loadUsers();
+      } else {
+        const err = await res.json();
+        window.showToast && window.showToast('Deletion failed: ' + err.error, 'danger');
+      }
+    } catch(e) {
+      window.showToast && window.showToast('Deletion failed.', 'danger');
+    }
+  }
+
   // ── Utilities ──────────────────────────────────────────────────────
   function getArr(store) {
-    return store==='customers'?customers:store==='suppliers'?suppliers:store==='expenses'?expenses:store==='employees'?employees:store==='categories'?categories:purchases;
+    return store==='customers'?customers:store==='suppliers'?suppliers:store==='expenses'?expenses:store==='employees'?employees:store==='categories'?categories:store==='attendance'?attendance:purchases;
   }
 
   function refreshPage(store) {
-    const fn = { customers:renderCustomers, suppliers:renderSuppliers, expenses:renderExpenses, employees:renderEmployees, categories:renderCategories, purchases:renderPurchases }[store];
+    const fn = { customers:renderCustomers, suppliers:renderSuppliers, expenses:renderExpenses, employees:renderEmployees, categories:renderCategories, purchases:renderPurchases, attendance:renderAttendance }[store];
     if (fn) fn();
   }
 

@@ -124,7 +124,8 @@ window.getMailboxState = function(store) {
     invoices: { name: 'INBOX.invoices', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 },
     settings: { name: 'INBOX.settings', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 },
     activity: { name: 'INBOX.activity', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 },
-    submissions: { name: 'INBOX.submissions', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 }
+    submissions: { name: 'INBOX.submissions', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 },
+    attendance: { name: 'INBOX.attendance', uidValidity: 20260608, highestModSeq: 0, lastSync: 0 }
   };
   var stored = localStorage.getItem('printex_mailbox_' + store);
   if (stored) {
@@ -148,7 +149,7 @@ window.toggleSyncPanel = function(e) {
 window.updateSyncPanelUI = async function() {
   var lastSyncText = 'Never';
   var lastSyncTime = 0;
-  var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases'];
+  var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases', 'attendance'];
   var counts = {};
   
   for (var i = 0; i < stores.length; i++) {
@@ -221,7 +222,7 @@ window.syncData = async function() {
   window.updateSyncStatus('syncing');
 
   try {
-    var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases'];
+    var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases', 'attendance'];
     var currentSyncTime = Date.now();
 
     // 1. EXPUNGE (deleted items sync & hard delete)
@@ -281,8 +282,10 @@ window.syncData = async function() {
     var unsyncedEmployees = localEmployees.filter(function(x) { return !x._synced && !x._deleted; });
     var localPurchases = await window.dbGet('purchases') || [];
     var unsyncedPurchases = localPurchases.filter(function(x) { return !x._synced && !x._deleted; });
+    var localAttendance = await window.dbGet('attendance') || [];
+    var unsyncedAttendance = localAttendance.filter(function(x) { return !x._synced && !x._deleted; });
 
-    var totalUnsynced = unsyncedParts.length + unsyncedInvoices.length + unsyncedSubmissions.length + unsyncedActivity.length + unsyncedSettings.length + unsyncedCategories.length + unsyncedCustomers.length + unsyncedSuppliers.length + unsyncedExpenses.length + unsyncedEmployees.length + unsyncedPurchases.length;
+    var totalUnsynced = unsyncedParts.length + unsyncedInvoices.length + unsyncedSubmissions.length + unsyncedActivity.length + unsyncedSettings.length + unsyncedCategories.length + unsyncedCustomers.length + unsyncedSuppliers.length + unsyncedExpenses.length + unsyncedEmployees.length + unsyncedPurchases.length + unsyncedAttendance.length;
     if (totalUnsynced > 0) {
       console.log('[Sync] Pushing ' + totalUnsynced + ' unsynced items across all stores.');
       var pushRes = await authenticatedFetch('/api/sync/push', {
@@ -298,7 +301,8 @@ window.syncData = async function() {
           suppliers: unsyncedSuppliers,
           expenses: unsyncedExpenses,
           employees: unsyncedEmployees,
-          purchases: unsyncedPurchases
+          purchases: unsyncedPurchases,
+          attendance: unsyncedAttendance
         })
       });
 
@@ -321,6 +325,7 @@ window.syncData = async function() {
       await markSynced('expenses', unsyncedExpenses);
       await markSynced('employees', unsyncedEmployees);
       await markSynced('purchases', unsyncedPurchases);
+      await markSynced('attendance', unsyncedAttendance);
     }
 
     // 3. PULL (Delta pull with UIDVALIDITY checks)
@@ -430,8 +435,8 @@ window.syncData = async function() {
       }
     }
 
-    // Pull new business stores (categories, customers, suppliers, expenses, employees, purchases)
-    var newStores = ['categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases'];
+    // Pull new business stores (categories, customers, suppliers, expenses, employees, purchases, attendance)
+    var newStores = ['categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases', 'attendance'];
     for (var ns = 0; ns < newStores.length; ns++) {
       var nsName = newStores[ns];
       if (serverData[nsName] && serverData[nsName].length) {
@@ -461,6 +466,7 @@ window.syncData = async function() {
       window.invoices = await window.dbGet('invoices') || [];
       window.submissions = await window.dbGet('submissions') || [];
       window.activityLog = await window.dbGet('activity') || [];
+      window.attendance = await window.dbGet('attendance') || [];
 
       var settingsArr = await window.dbGet('settings') || [];
       window.settings = {};

@@ -1261,10 +1261,12 @@ input[title]:hover::before,select[title]:hover::before{display:none}
   <div class="nav-item" onclick="showPage('expenses',this)"><i class="fa fa-receipt"></i> Expenses</div>
   <div class="nav-item" onclick="showPage('purchases',this)"><i class="fa fa-cart-plus"></i> Purchases</div>
   <div class="nav-item" onclick="showPage('employees',this)"><i class="fa fa-id-badge"></i> Employees</div>
+  <div class="nav-item" onclick="showPage('attendance',this)"><i class="fa fa-calendar-check"></i> Attendance</div>
   <div class="nav-item" onclick="showPage('categories',this)"><i class="fa fa-tags"></i> Categories</div>
   <div class="nav-section">Tools</div>
   <div class="nav-item" onclick="showPage('reports',this)"><i class="fa fa-chart-bar"></i> Reports</div>
   <div class="nav-item" onclick="showPage('analytics',this)"><i class="fa fa-building"></i> Company Analytics</div>
+  <div class="nav-item" onclick="showPage('users',this)"><i class="fa fa-user-shield"></i> User Management</div>
   <div class="nav-item" onclick="showPage('ai',this)" id="navAI" title="Open Printex AI Assistant"><i class="fa fa-robot"></i> AI Assistant <span class="nav-badge" id="aiBadge" style="display:none;background:var(--accent)">NEW</span></div>
   <div class="nav-item" onclick="showPage('settings',this)"><i class="fa fa-cog"></i> Settings</div>
   <div class="sidebar-footer">
@@ -1281,9 +1283,14 @@ input[title]:hover::before,select[title]:hover::before{display:none}
 
 <div id="main">
   <div id="topbar">
-    <div class="topbar-left">
+    <div class="topbar-left" style="display:flex;align-items:center;gap:15px;flex:1">
       <button class="menu-btn icon-btn" onclick="toggleSidebar()"><i class="fa fa-bars"></i></button>
-      <div class="page-title-bar" id="pageTitleBar">Dashboard</div>
+      <div class="page-title-bar" id="pageTitleBar" style="white-space:nowrap">Dashboard</div>
+      <div class="search-wrap" style="max-width:350px;width:100%;margin-left:15px;position:relative">
+        <i class="fa fa-search"></i>
+        <input class="search-input" id="globalSearchInput" placeholder="Search system (parts, invoices, customers...)" oninput="window.handleGlobalSearch(this.value)" onfocus="window.showGlobalSearchDropdown()" onblur="setTimeout(window.hideGlobalSearchDropdown, 250)"/>
+        <div id="globalSearchDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);box-shadow:0 10px 25px rgba(0,0,0,0.5);max-height:400px;overflow-y:auto;z-index:9999;margin-top:5px;padding:8px"></div>
+      </div>
     </div>
     <div class="topbar-right" style="display:flex;align-items:center;gap:10px">
       <div id="syncIndicator" style="position:relative;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:5px 10px;border-radius:20px;background:var(--bg3);border:1px solid var(--border2);cursor:pointer;user-select:none;transition:all 0.2s" onclick="window.toggleSyncPanel(event)" title="Click to view sync status">
@@ -1941,6 +1948,51 @@ input[title]:hover::before,select[title]:hover::before{display:none}
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- ATTENDANCE PAGE                                                       -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <div class="page fade-in" id="page-attendance">
+      <div class="kpi-grid" id="attKpiGrid" style="margin-bottom:20px">
+        <div class="kpi-card">
+          <div class="kpi-icon" style="background:rgba(0,212,255,0.1);color:var(--accent)"><i class="fa fa-users"></i></div>
+          <div class="kpi-value" id="attKpiActive">0</div>
+          <div class="kpi-label">Active Employees</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon" style="background:rgba(40,167,69,0.1);color:var(--success)"><i class="fa fa-user-check"></i></div>
+          <div class="kpi-value" id="attKpiPresent">0</div>
+          <div class="kpi-label">Present Today</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon" style="background:rgba(220,53,69,0.1);color:var(--danger)"><i class="fa fa-user-xmark"></i></div>
+          <div class="kpi-value" id="attKpiAbsent">0</div>
+          <div class="kpi-label">Absent Today</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon" style="background:rgba(255,193,7,0.1);color:var(--gold)"><i class="fa fa-user-clock"></i></div>
+          <div class="kpi-value" id="attKpiLate">0</div>
+          <div class="kpi-label">Late/On-Leave Today</div>
+        </div>
+      </div>
+      <div class="section-controls">
+        <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="attSearch" placeholder="Search roster..." oninput="window.biz && window.biz.filterAttendance()"/></div>
+        <input class="select" type="date" id="attDateFilter" onchange="window.biz && window.biz.filterAttendance()" style="width:auto"/>
+        <button class="btn btn-primary btn-sm" onclick="window.biz && window.biz.saveDailyAttendance()"><i class="fa fa-save"></i> Save Daily Roster</button>
+        <button class="btn btn-success btn-sm" onclick="exportAttendanceExcel()"><i class="fa fa-file-excel"></i> Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="exportAttendanceCSV()"><i class="fa fa-file-csv"></i> CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="exportAttendancePDF()"><i class="fa fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="printAttendanceTable()"><i class="fa fa-print"></i> Print</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Employee</th><th>Role</th><th>Status today</th><th>Notes / Remarks</th><th>Last Marked</th>
+          </tr></thead>
+          <tbody id="attBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
     <!-- CATEGORIES PAGE                                                       -->
     <!-- ═══════════════════════════════════════════════════════════════════ -->
     <div class="page fade-in" id="page-categories">
@@ -1950,6 +2002,24 @@ input[title]:hover::before,select[title]:hover::before{display:none}
         <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.filterCategories()"><i class="fa fa-sync"></i> Refresh</button>
       </div>
       <div id="catMgmtGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-top:20px;"></div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- USER MANAGEMENT PAGE                                                  -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <div class="page fade-in" id="page-users">
+      <div class="section-controls">
+        <div class="search-wrap"><i class="fa fa-search"></i><input class="search-input" id="userSearch" placeholder="Search email, name..." oninput="window.biz && window.biz.filterUsers()"/></div>
+        <button class="btn btn-outline btn-sm" onclick="window.biz && window.biz.loadUsers()"><i class="fa fa-sync"></i> Refresh Users</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Full Name</th><th>Email Address</th><th>Role</th><th>Registered At</th><th>Action</th>
+          </tr></thead>
+          <tbody id="userBody"></tbody>
+        </table>
+      </div>
     </div>
 
   </div><!-- /content -->
