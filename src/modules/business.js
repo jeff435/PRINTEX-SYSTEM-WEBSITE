@@ -34,8 +34,21 @@
   }
 
   // ── Generic Modal Helper ────────────────────────────────────────────
-  function openModal(id) { const m = document.getElementById(id); if (m) m.style.display = 'flex'; }
-  function closeModal(id) { const m = document.getElementById(id); if (m) m.style.display = 'none'; }
+  function openModal(id) {
+    const m = document.getElementById(id);
+    if (m) {
+      m.style.display = 'flex';
+      // Trigger class for CSS transition opacity / pointer-events
+      m.classList.add('open');
+    }
+  }
+  function closeModal(id) {
+    const m = document.getElementById(id);
+    if (m) {
+      m.classList.remove('open');
+      m.style.display = 'none';
+    }
+  }
   window.bizCloseModal = closeModal;
 
   // ── Load from IndexedDB ─────────────────────────────────────────────
