@@ -1193,7 +1193,8 @@
     deleteUser,
     // Common
     saveRecord,
-    deleteRecord
+    deleteRecord,
+    parsePurchaseItems
   };
 
   // Auto-init once DB is ready

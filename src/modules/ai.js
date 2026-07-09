@@ -957,7 +957,19 @@ When you need to take an action (add part, update stock, navigate), include a JS
 }
 \`\`\`
 
-Available actions: add_part, update_stock, navigate_to, show_alert, bulk_add_parts (data.parts = array)
+Available actions:
+- add_part: data={partNum, desc, category, stock, minStock, priceKsh, supplier, location}
+- bulk_add_parts: data={parts: [{partNum, desc, category, ...}]}
+- update_stock: data={partNum or id, stock}
+- navigate_to: data={page: 'dashboard'|'inventory'|'invoices'|'quotations'|'createInvoice'|'services'|'freelance'|'customers'|'suppliers'|'expenses'|'purchases'|'employees'|'attendance'|'categories'|'reports'|'analytics'|'users'|'settings'}
+- show_alert: data={message, type: 'warn'|'success'|'error'}
+- open_payment_tool: data={tool: 'mpesa'|'paybill'|'bank'|'till'}
+- add_customer: data={name, company, email, phone, address, notes}
+- add_supplier: data={name, contact, phone, email, products, leadDays}
+- add_expense: data={description, amount, date (YYYY-MM-DD), category, paymentMethod, reference, notes}
+- add_employee: data={name, role, phone, email, salary, startDate, nationalId, status ('active'|'inactive'), notes}
+- add_category: data={name, code, icon (e.g. 'fa-tags'), color, description}
+- add_purchase: data={poNumber, date, supplier, status ('pending'|'received'|'cancelled'), description (newline-separated list, e.g. "SKU-001 x5\nSKU-002 x2"), total, expectedDate, notes}
 
 === RULES ===
 - Always use KSH for currency (never USD unless asked)
@@ -1295,6 +1307,173 @@ window.executeAIAction = async function(action) {
           window.openPayToolModal(tool);
           window.logAIAction(`💳 AI opened payment tool: ${tool}`);
         }
+        break;
+      }
+      case 'add_customer': {
+        const d = action.data;
+        if (!d.name) { window.showToast('AI tried to add customer but missing name', 'warn'); return; }
+        const newCust = {
+          id: 'cus_' + Date.now(),
+          name: d.name,
+          company: d.company || '',
+          email: d.email || '',
+          phone: d.phone || '',
+          address: d.address || '',
+          notes: d.notes || '',
+          orderCount: 0,
+          updatedAt: Date.now()
+        };
+        await window.dbPut('customers', newCust);
+        if (window.customers) window.customers.push(newCust);
+        if (window.biz && typeof window.biz.filterCustomers === 'function') window.biz.filterCustomers();
+        await window.logActivity(`AI added customer: ${newCust.name}`, 'customer');
+        window.logAIAction(`👤 Added Customer: ${newCust.name}`);
+        window.showToast(`AI added customer: ${newCust.name}`, 'success');
+        window.appendActionButtons([{ label: '👤 View Customers', onclick: `showPage('customers', Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes('customers')))` }]);
+        break;
+      }
+      case 'add_supplier': {
+        const d = action.data;
+        if (!d.name) { window.showToast('AI tried to add supplier but missing name', 'warn'); return; }
+        const newSup = {
+          id: 'sup_' + Date.now(),
+          name: d.name,
+          contact: d.contact || '',
+          phone: d.phone || '',
+          email: d.email || '',
+          products: d.products || '',
+          leadDays: parseInt(d.leadDays) || 14,
+          updatedAt: Date.now()
+        };
+        await window.dbPut('suppliers', newSup);
+        if (window.suppliers) window.suppliers.push(newSup);
+        if (window.biz && typeof window.biz.filterSuppliers === 'function') window.biz.filterSuppliers();
+        await window.logActivity(`AI added supplier: ${newSup.name}`, 'supplier');
+        window.logAIAction(`🏭 Added Supplier: ${newSup.name}`);
+        window.showToast(`AI added supplier: ${newSup.name}`, 'success');
+        window.appendActionButtons([{ label: '🏭 View Suppliers', onclick: `showPage('suppliers', Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes('suppliers')))` }]);
+        break;
+      }
+      case 'add_expense': {
+        const d = action.data;
+        if (!d.description || !d.amount) { window.showToast('AI tried to add expense but missing description or amount', 'warn'); return; }
+        const newExp = {
+          id: 'exp_' + Date.now(),
+          description: d.description,
+          amount: parseFloat(d.amount) || 0,
+          date: d.date || new Date().toISOString().split('T')[0],
+          category: d.category || 'General',
+          paymentMethod: d.paymentMethod || 'M-Pesa',
+          reference: d.reference || '',
+          notes: d.notes || '',
+          updatedAt: Date.now()
+        };
+        await window.dbPut('expenses', newExp);
+        if (window.expenses) window.expenses.push(newExp);
+        if (window.biz && typeof window.biz.filterExpenses === 'function') window.biz.filterExpenses();
+        await window.logActivity(`AI recorded expense: ${newExp.description} (KSH ${newExp.amount.toLocaleString()})`, 'expense');
+        window.logAIAction(`💸 Recorded Expense: ${newExp.description} (KSH ${newExp.amount.toLocaleString()})`);
+        window.showToast(`AI recorded expense: ${newExp.description}`, 'success');
+        window.appendActionButtons([{ label: '💸 View Expenses', onclick: `showPage('expenses', Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes('expenses')))` }]);
+        break;
+      }
+      case 'add_employee': {
+        const d = action.data;
+        if (!d.name) { window.showToast('AI tried to add employee but missing name', 'warn'); return; }
+        const newEmp = {
+          id: 'emp_' + Date.now(),
+          name: d.name,
+          role: d.role || 'Staff',
+          phone: d.phone || '',
+          email: d.email || '',
+          salary: parseFloat(d.salary) || 0,
+          startDate: d.startDate || new Date().toISOString().split('T')[0],
+          nationalId: d.nationalId || '',
+          status: d.status || 'active',
+          notes: d.notes || '',
+          updatedAt: Date.now()
+        };
+        await window.dbPut('employees', newEmp);
+        if (window.employees) window.employees.push(newEmp);
+        if (window.biz && typeof window.biz.filterEmployees === 'function') window.biz.filterEmployees();
+        await window.logActivity(`AI added employee: ${newEmp.name}`, 'employee');
+        window.logAIAction(`👤 Added Employee: ${newEmp.name}`);
+        window.showToast(`AI added employee: ${newEmp.name}`, 'success');
+        window.appendActionButtons([{ label: '👤 View Employees', onclick: `showPage('employees', Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes('employees')))` }]);
+        break;
+      }
+      case 'add_category': {
+        const d = action.data;
+        if (!d.name || !d.code) { window.showToast('AI tried to add category but missing name or code', 'warn'); return; }
+        const newCat = {
+          id: 'cat_' + Date.now(),
+          name: d.name,
+          code: d.code.toUpperCase(),
+          icon: d.icon || 'fa-tags',
+          color: d.color || 'var(--accent)',
+          description: d.description || '',
+          updatedAt: Date.now()
+        };
+        await window.dbPut('categories', newCat);
+        if (window.categories) window.categories.push(newCat);
+        if (window.biz && typeof window.biz.filterCategories === 'function') window.biz.filterCategories();
+        if (typeof window.populateCategorySelects === 'function') window.populateCategorySelects();
+        await window.logActivity(`AI added category: ${newCat.name} (${newCat.code})`, 'category');
+        window.logAIAction(`🏷️ Added Category: ${newCat.name}`);
+        window.showToast(`AI added category: ${newCat.name}`, 'success');
+        window.appendActionButtons([{ label: '🏷️ View Categories', onclick: `showPage('categories', Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes('categories')))` }]);
+        break;
+      }
+      case 'add_purchase': {
+        const d = action.data;
+        if (!d.total) { window.showToast('AI tried to add purchase but missing total amount', 'warn'); return; }
+        const poNum = d.poNumber || ('PO-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + Math.floor(100 + Math.random() * 900));
+        const newPur = {
+          id: 'pur_' + Date.now(),
+          poNumber: poNum,
+          date: d.date || new Date().toISOString().split('T')[0],
+          supplier: d.supplier || '',
+          status: d.status || 'pending',
+          description: d.description || '',
+          total: parseFloat(d.total) || 0,
+          expectedDate: d.expectedDate || '',
+          notes: d.notes || '',
+          updatedAt: Date.now()
+        };
+        await window.dbPut('purchases', newPur);
+        if (window.purchases) window.purchases.push(newPur);
+        
+        if (newPur.status === 'received') {
+          if (window.biz && typeof window.biz.parsePurchaseItems === 'function') {
+            const parsed = window.biz.parsePurchaseItems(newPur.description);
+            for (const item of parsed) {
+              item.part.stock = (item.part.stock || 0) + item.qty;
+              await window.dbPut('parts', item.part);
+              if (window.logActivity) {
+                await window.logActivity(`Received purchase parts: ${item.part.partNum} (+${item.qty})`, 'stock');
+              }
+            }
+          }
+          const expenseRecord = {
+            id: 'exp_po_' + newPur.id,
+            description: `PO Receipt: ${newPur.poNumber} from ${newPur.supplier}`,
+            amount: Number(newPur.total) || 0,
+            date: newPur.date || new Date().toISOString().split('T')[0],
+            category: 'Parts & Supplies',
+            paymentMethod: 'Bank Transfer',
+            reference: newPur.poNumber,
+            notes: newPur.notes || 'Automatically recorded via PO status set to received.',
+            updatedAt: Date.now()
+          };
+          await window.dbPut('expenses', expenseRecord);
+          if (window.expenses) window.expenses.push(expenseRecord);
+        }
+
+        if (window.biz && typeof window.biz.filterPurchases === 'function') window.biz.filterPurchases();
+        await window.logActivity(`AI recorded purchase order: ${newPur.poNumber}`, 'purchase');
+        window.logAIAction(`🛒 Created PO: ${newPur.poNumber}`);
+        window.showToast(`AI created purchase order: ${newPur.poNumber}`, 'success');
+        window.appendActionButtons([{ label: '🛒 View Purchases', onclick: `showPage('purchases', Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes('purchases')))` }]);
         break;
       }
     }

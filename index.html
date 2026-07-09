@@ -1768,6 +1768,63 @@ input[title]:hover::before,select[title]:hover::before{display:none}
             </div>
           </div>
 
+          <!-- ── RECORD TOOLS ── -->
+          <div class="card card-sm">
+            <div style="font-size:12px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:6px">
+              <i class="fa fa-folder-open" style="color:var(--accent)"></i> Record Tools
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <button class="pay-tool-btn" style="padding:8px" onclick="window.biz && window.biz.openCustomerModal()" title="Add a new customer">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <i class="fa fa-user-plus" style="font-size:14px;color:var(--success)"></i>
+                  <span style="font-size:11px;font-weight:600">Add Customer</span>
+                </div>
+              </button>
+              <button class="pay-tool-btn" style="padding:8px" onclick="window.biz && window.biz.openSupplierModal()" title="Add a new supplier">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <i class="fa fa-industry" style="font-size:14px;color:var(--gold)"></i>
+                  <span style="font-size:11px;font-weight:600">Add Supplier</span>
+                </div>
+              </button>
+              <button class="pay-tool-btn" style="padding:8px" onclick="window.biz && window.biz.openCategoryModal()" title="Add a new category">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <i class="fa fa-tags" style="font-size:14px;color:var(--accent)"></i>
+                  <span style="font-size:11px;font-weight:600">Add Category</span>
+                </div>
+              </button>
+              <button class="pay-tool-btn" style="padding:8px" onclick="window.biz && window.biz.openEmployeeModal()" title="Add a new employee">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <i class="fa fa-id-badge" style="font-size:14px;color:var(--success)"></i>
+                  <span style="font-size:11px;font-weight:600">Add Employee</span>
+                </div>
+              </button>
+              <button class="pay-tool-btn" style="padding:8px" onclick="window.biz && window.biz.openPurchaseModal()" title="New purchase order">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <i class="fa fa-cart-plus" style="font-size:14px;color:var(--accent)"></i>
+                  <span style="font-size:11px;font-weight:600">New Purchase</span>
+                </div>
+              </button>
+              <button class="pay-tool-btn" style="padding:8px" onclick="window.biz && window.biz.openExpenseModal()" title="Record a new expense">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <i class="fa fa-receipt" style="font-size:14px;color:var(--danger)"></i>
+                  <span style="font-size:11px;font-weight:600">Record Expense</span>
+                </div>
+              </button>
+            </div>
+            <!-- AI record quick actions -->
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+              <div style="font-size:10px;color:var(--dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em">Ask AI to help</div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px">
+                <button class="ai-chip" style="font-size:10px;padding:3px 9px" onclick="aiQuick('I want to add a new customer, ask me for details or help me do it')">👤 Customer</button>
+                <button class="ai-chip" style="font-size:10px;padding:3px 9px" onclick="aiQuick('I need to record an expense for office rent or tools')">💸 Expense</button>
+                <button class="ai-chip" style="font-size:10px;padding:3px 9px" onclick="aiQuick('Help me add a new category for our inventory')">🏷️ Category</button>
+                <button class="ai-chip" style="font-size:10px;padding:3px 9px" onclick="aiQuick('Add a new employee to our roster')">👥 Employee</button>
+                <button class="ai-chip" style="font-size:10px;padding:3px 9px" onclick="aiQuick('I want to create a new purchase order for supplier')">🛒 Purchase</button>
+                <button class="ai-chip" style="font-size:10px;padding:3px 9px" onclick="aiQuick('Help me register a new supplier')">🏭 Supplier</button>
+              </div>
+            </div>
+          </div>
+
           <!-- ── LIVE CONTEXT ── -->
           <div class="card card-sm" id="aiInventoryPanel">
             <div style="font-size:12px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:6px">
