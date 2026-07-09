@@ -700,6 +700,8 @@
         if (typeof window.renderDashboard === 'function') window.renderDashboard();
       }
       refreshPage(store);
+      if (typeof window.renderDashboard === 'function') window.renderDashboard();
+      if (typeof window.renderReports === 'function') window.renderReports();
       window.showToast && window.showToast('✅ Saved successfully!', 'success');
       window.syncData && window.syncData();
     } catch (e) {
@@ -733,6 +735,8 @@
         if (typeof window.renderDashboard === 'function') window.renderDashboard();
       }
       refreshPage(store);
+      if (typeof window.renderDashboard === 'function') window.renderDashboard();
+      if (typeof window.renderReports === 'function') window.renderReports();
       window.showToast && window.showToast(`🗑️ ${label} deleted.`, 'success');
       window.syncData && window.syncData();
     } catch (e) {
@@ -743,7 +747,9 @@
 
   // ── Field gathering per store ───────────────────────────────────────
   function gatherFields(store) {
-    const g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const modalId = { customers: 'custModal', suppliers: 'supModal', expenses: 'expModal', employees: 'empModal', categories: 'catMgmtModal', purchases: 'purModal' }[store];
+    const m = document.getElementById(modalId);
+    const g = id => { const el = m ? m.querySelector('#' + id) : null; return el ? el.value.trim() : ''; };
     const now = Date.now();
 
     if (store === 'customers') {
@@ -958,6 +964,8 @@
     window.exportToExcel(headers, rows, 'Attendance', `Printex_Attendance_${dateFilter}.xlsx`);
   }
 
+  window.exportAttendanceCSV = exportAttendanceCSV;
+  window.exportAttendanceExcel = exportAttendanceExcel;
   window.printAttendanceTable = function () {
     window.printTable('page-attendance', 'Employee Daily Attendance Roster');
   };

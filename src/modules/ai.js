@@ -870,13 +870,13 @@ window.buildSystemPrompt = function() {
   const outOfStock = window.parts.filter(p => p.stock === 0);
   const totalValue = window.parts.reduce((s, p) => s + (p.stock * (p.priceKsh || 0)), 0);
 
-  const cats = ['A','B','C','D','E','F','G','J','K','L'];
-  const catNames = {A:'Valves & Pneumatic Parts',B:'Bellows & Autoplate Parts',C:'Bearings & Gears',D:'Cam Followers',E:'Grippers & Separators',F:'Heidelberg Parts',G:'Sensors & Electronics',J:'Motors & Belts',K:'Cylinders',L:'Consumables'};
-  const catBreakdown = cats.map(c => {
-    const ps = window.parts.filter(p => p.category === c);
+  const activeCats = (window.categories || []).filter(c => !c._deleted);
+  const catBreakdown = activeCats.map(c => {
+    const catCode = c.code || c.name;
+    const ps = window.parts.filter(p => p.category === catCode);
     const val = ps.reduce((s,p) => s + p.stock*(p.priceKsh||0), 0);
-    return `  Cat ${c} (${catNames[c]}): ${ps.length} parts, stock value KSH ${val.toLocaleString()}`;
-  }).join('\n');
+    return `  Cat ${catCode} (${c.name}): ${ps.length} parts, stock value KSH ${val.toLocaleString()}`;
+  }).join('\n') || '  No categories defined.';
 
   const invLines = window.parts.map(p =>
     `[${p.category}] ${p.partNum} | ${p.desc.slice(0,60)} | Stock:${p.stock}/${p.minStock}min | KSH ${p.priceKsh||0} | ${p.supplier||'?'} | ${p.location||'?'}`
@@ -890,6 +890,22 @@ window.buildSystemPrompt = function() {
   const quoteRevenue = proformaQuotes.reduce((s,i) => s + i.grand, 0);
   const recentQuote = proformaQuotes.slice(-3).map(i => `  ${i.invoiceNumber} | ${i.customer} | KSH ${Math.round(i.grand).toLocaleString()} | ${i.date}`).join('\n');
 
+  // LIVE SNAPSHOT CONTEXT FROM ALL DATABASE STORES
+  const activeCustomers = (window.customers || []).filter(c => !c._deleted);
+  const customersContext = activeCustomers.map(c => `  - ${c.name} | ${c.company || 'Private'} | Phone: ${c.phone || '-'} | Email: ${c.email || '-'}`).join('\n') || '  No customers registered.';
+
+  const activeSuppliers = (window.suppliers || []).filter(s => !s._deleted);
+  const suppliersContext = activeSuppliers.map(s => `  - ${s.name} | Contact: ${s.contact || '-'} | Lead Time: ${s.leadDays ? s.leadDays + 'd' : '?'}`).join('\n') || '  No suppliers registered.';
+
+  const activeEmployees = (window.employees || []).filter(e => !e._deleted);
+  const employeesContext = activeEmployees.map(e => `  - ${e.name} | Role: ${e.role} | Salary: KSH ${e.salary.toLocaleString()} | Status: ${e.status}`).join('\n') || '  No employees registered.';
+
+  const activeExpenses = (window.expenses || []).filter(e => !e._deleted);
+  const expensesContext = activeExpenses.slice(-10).map(e => `  - KSH ${e.amount.toLocaleString()} | ${e.description} | Date: ${e.date}`).join('\n') || '  No recent expenses recorded.';
+
+  const activePurchases = (window.purchases || []).filter(p => !p._deleted);
+  const purchasesContext = activePurchases.slice(-10).map(p => `  - ${p.poNumber} | Supplier: ${p.supplier} | Total: KSH ${p.total.toLocaleString()} | Status: ${p.status}`).join('\n') || '  No recent purchases recorded.';
+
   return `You are PRINTEX AI, the dedicated intelligent business assistant for Printex Engineers Limited — a professional printing machinery parts supplier based in Nairobi, Kenya.
 
 === YOUR CAPABILITIES ===
@@ -900,6 +916,7 @@ window.buildSystemPrompt = function() {
 5. DOCUMENT ANALYSIS: If a file is attached, read it and extract parts to add to inventory.
 6. ANALYTICS: Give business insights on stock value, sales, trends.
 7. GUIDANCE: Help stuck users step by step. Be patient, professional, and specific.
+8. CUSTOMERS, SUPPLIERS, EMPLOYEES & TRANSACTIONS: You can read, record and manage other record types (customers, suppliers, expenses, employee registry, category systems, purchase orders) dynamically via execution action blocks.
 
 === LIVE INVENTORY SNAPSHOT (${new Date().toLocaleDateString('en-KE')}) ===
 Total Parts: ${totalParts} | In Stock: ${inStock} | Low Stock: ${lowStock.length} | Out of Stock: ${outOfStock.length}
@@ -911,6 +928,21 @@ ${catBreakdown}
 ${lowStock.length > 0 ? `⚠️ LOW STOCK ALERT (${lowStock.length} items):\n${lowStock.slice(0,10).map(p=>`  ${p.partNum}: ${p.stock} remaining (min ${p.minStock})`).join('\n')}` : '✅ No low stock issues.'}
 
 ${outOfStock.length > 0 ? `🚫 OUT OF STOCK (${outOfStock.length} items):\n${outOfStock.slice(0,10).map(p=>`  ${p.partNum}: ${p.desc.slice(0,50)}`).join('\n')}` : '✅ No out-of-stock items.'}
+
+=== LIVE CUSTOMERS ===
+${customersContext}
+
+=== LIVE SUPPLIERS ===
+${suppliersContext}
+
+=== LIVE EMPLOYEES ===
+${employeesContext}
+
+=== RECENT EXPENSES ===
+${expensesContext}
+
+=== RECENT PURCHASE ORDERS ===
+${purchasesContext}
 
 === FULL INVENTORY ===
 ${invLines}
@@ -1477,6 +1509,10 @@ window.executeAIAction = async function(action) {
         break;
       }
     }
+    // Always refresh dashboard and reports after any action
+    if (typeof window.renderDashboard === 'function') window.renderDashboard();
+    if (typeof window.renderReports === 'function') window.renderReports();
+    if (typeof window.syncData === 'function') window.syncData();
   } catch(e) {
     console.error('Action execution error:', e);
     window.showToast('AI action failed: ' + e.message, 'error');
