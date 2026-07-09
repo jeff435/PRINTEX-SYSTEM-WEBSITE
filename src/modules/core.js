@@ -2235,3 +2235,288 @@ if (!navigator.onLine) {
 } else if (window.fDb) {
   window.updateSyncStatus('synced');
 }
+
+// ── GLOBAL SEARCH IMPLEMENTATION ────────────────────────────────────
+window.showGlobalSearchDropdown = function() {
+  const dropdown = document.getElementById('globalSearchDropdown');
+  if (dropdown) dropdown.style.display = 'block';
+};
+
+window.hideGlobalSearchDropdown = function() {
+  const dropdown = document.getElementById('globalSearchDropdown');
+  if (dropdown) dropdown.style.display = 'none';
+};
+
+window.handleGlobalSearch = function(query) {
+  const dropdown = document.getElementById('globalSearchDropdown');
+  if (!dropdown) return;
+  
+  query = (query || '').trim().toLowerCase();
+  if (!query) {
+    dropdown.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--muted);text-align:center">Type to search across Printex...</div>';
+    return;
+  }
+
+  const results = [];
+
+  // 1. Search Parts
+  const parts = window.parts || [];
+  parts.forEach(p => {
+    const partNum = p.partNum || p.part_num || '';
+    const desc = p.desc || p.description || '';
+    const supplier = p.supplier || '';
+    const location = p.location || '';
+    if (partNum.toLowerCase().includes(query) ||
+        desc.toLowerCase().includes(query) ||
+        supplier.toLowerCase().includes(query) ||
+        location.toLowerCase().includes(query)) {
+      results.push({
+        type: 'Inventory',
+        title: partNum,
+        subtitle: `${desc} (${location || 'No Location'}) - Stock: ${p.stock}`,
+        icon: 'fa-boxes-stacked',
+        action: () => {
+          const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'inventory'"));
+          window.showPage('inventory', navEl);
+          const searchInput = document.getElementById('invSearch');
+          if (searchInput) {
+            searchInput.value = partNum;
+            window.filterInventory();
+          }
+        }
+      });
+    }
+  });
+
+  // 2. Search Categories
+  const categories = window.categories || [];
+  categories.forEach(c => {
+    const name = c.name || '';
+    const code = c.code || '';
+    const description = c.description || '';
+    if (name.toLowerCase().includes(query) ||
+        code.toLowerCase().includes(query) ||
+        description.toLowerCase().includes(query)) {
+      results.push({
+        type: 'Category',
+        title: `[${code}] ${name}`,
+        subtitle: description || 'Category System',
+        icon: 'fa-tags',
+        action: () => {
+          const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'categories'"));
+          window.showPage('categories', navEl);
+          const searchInput = document.getElementById('catMgmtSearch');
+          if (searchInput) {
+            searchInput.value = name;
+            if (window.biz && window.biz.filterCategories) window.biz.filterCategories();
+          }
+        }
+      });
+    }
+  });
+
+  // 3. Search Customers
+  const customers = window.customers || [];
+  customers.forEach(c => {
+    const name = c.name || '';
+    const company = c.company || '';
+    const email = c.email || '';
+    const phone = c.phone || '';
+    if (name.toLowerCase().includes(query) ||
+        company.toLowerCase().includes(query) ||
+        email.toLowerCase().includes(query) ||
+        phone.toLowerCase().includes(query)) {
+      results.push({
+        type: 'Customer',
+        title: name,
+        subtitle: `${company || 'Private Customer'} | Phone: ${phone || '-'}`,
+        icon: 'fa-user',
+        action: () => {
+          const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'customers'"));
+          window.showPage('customers', navEl);
+          const searchInput = document.getElementById('custSearch');
+          if (searchInput) {
+            searchInput.value = name;
+            if (window.biz && window.biz.filterCustomers) window.biz.filterCustomers();
+          }
+        }
+      });
+    }
+  });
+
+  // 4. Search Suppliers
+  const suppliers = window.suppliers || [];
+  suppliers.forEach(s => {
+    const name = s.name || '';
+    const contact = s.contact || '';
+    const email = s.email || '';
+    const phone = s.phone || '';
+    if (name.toLowerCase().includes(query) ||
+        contact.toLowerCase().includes(query) ||
+        email.toLowerCase().includes(query) ||
+        phone.toLowerCase().includes(query)) {
+      results.push({
+        type: 'Supplier',
+        title: name,
+        subtitle: `Contact: ${contact || '-'} | Phone: ${phone || '-'}`,
+        icon: 'fa-truck-field',
+        action: () => {
+          const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'suppliers'"));
+          window.showPage('suppliers', navEl);
+          const searchInput = document.getElementById('supSearch');
+          if (searchInput) {
+            searchInput.value = name;
+            if (window.biz && window.biz.filterSuppliers) window.biz.filterSuppliers();
+          }
+        }
+      });
+    }
+  });
+
+  // 5. Search Employees
+  const employees = window.employees || [];
+  employees.forEach(e => {
+    const name = e.name || '';
+    const role = e.role || '';
+    const phone = e.phone || '';
+    const email = e.email || '';
+    const nationalId = e.nationalId || '';
+    if (name.toLowerCase().includes(query) ||
+        role.toLowerCase().includes(query) ||
+        phone.toLowerCase().includes(query) ||
+        email.toLowerCase().includes(query) ||
+        nationalId.toLowerCase().includes(query)) {
+      results.push({
+        type: 'Employee',
+        title: name,
+        subtitle: `Role: ${role} | Status: ${e.status}`,
+        icon: 'fa-id-badge',
+        action: () => {
+          const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'employees'"));
+          window.showPage('employees', navEl);
+          const searchInput = document.getElementById('empSearch');
+          if (searchInput) {
+            searchInput.value = name;
+            if (window.biz && window.biz.filterEmployees) window.biz.filterEmployees();
+          }
+        }
+      });
+    }
+  });
+
+  // 6. Search Purchases
+  const purchases = window.purchases || [];
+  purchases.forEach(p => {
+    const poNumber = p.poNumber || '';
+    const supplier = p.supplier || '';
+    const notes = p.notes || '';
+    const description = p.description || '';
+    if (poNumber.toLowerCase().includes(query) ||
+        supplier.toLowerCase().includes(query) ||
+        notes.toLowerCase().includes(query) ||
+        description.toLowerCase().includes(query)) {
+      results.push({
+        type: 'Purchase Order',
+        title: poNumber,
+        subtitle: `Supplier: ${supplier} | KSH ${p.total.toLocaleString()} | ${p.status}`,
+        icon: 'fa-cart-shopping',
+        action: () => {
+          const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'purchases'"));
+          window.showPage('purchases', navEl);
+          const searchInput = document.getElementById('purSearch');
+          if (searchInput) {
+            searchInput.value = poNumber;
+            if (window.biz && window.biz.filterPurchases) window.biz.filterPurchases();
+          }
+        }
+      });
+    }
+  });
+
+  // 7. Search Expenses
+  const expenses = window.expenses || [];
+  expenses.forEach(e => {
+    const description = e.description || '';
+    const category = e.category || '';
+    const reference = e.reference || '';
+    const notes = e.notes || '';
+    if (description.toLowerCase().includes(query) ||
+        category.toLowerCase().includes(query) ||
+        reference.toLowerCase().includes(query) ||
+        notes.toLowerCase().includes(query)) {
+      results.push({
+        type: 'Expense',
+        title: description,
+        subtitle: `KSH ${e.amount.toLocaleString()} | Category: ${category} | ${e.date}`,
+        icon: 'fa-receipt',
+        action: () => {
+          const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'expenses'"));
+          window.showPage('expenses', navEl);
+          const searchInput = document.getElementById('expSearch');
+          if (searchInput) {
+            searchInput.value = description;
+            if (window.biz && window.biz.filterExpenses) window.biz.filterExpenses();
+          }
+        }
+      });
+    }
+  });
+
+  // 8. Search Reports
+  const reportTitles = [
+    { title: 'Inventory Valuation Report', keywords: ['valuation', 'stock value', 'inventory value', 'parts value', 'categories value'], tab: 'inventory' },
+    { title: 'Financial Income Statement / Revenue Report', keywords: ['revenue', 'sales', 'profit', 'income', 'projections'], tab: 'sales' },
+    { title: 'Expense Breakdown Report', keywords: ['expenses', 'cashflow', 'payments', 'spending'], tab: 'expenses' },
+    { title: 'Supplier Lead Time Statistics', keywords: ['suppliers', 'lead time', 'performance', 'purchase cycles'], tab: 'suppliers' },
+    { title: 'Employee Payroll & Attendance Summary', keywords: ['payroll', 'attendance', 'salaries', 'work days'], tab: 'employees' }
+  ];
+  reportTitles.forEach(rep => {
+    if (rep.title.toLowerCase().includes(query) || rep.keywords.some(k => k.includes(query))) {
+      results.push({
+        type: 'Report Module',
+        title: rep.title,
+        subtitle: `Jump to Reports page → ${rep.title}`,
+        icon: 'fa-chart-line',
+        action: () => {
+          const navEl = Array.from(document.querySelectorAll('.nav-item')).find(el => el.getAttribute('onclick')?.includes("'reports'"));
+          window.showPage('reports', navEl);
+          const tabBtn = Array.from(document.querySelectorAll('.report-tab-btn')).find(b => b.textContent.toLowerCase().includes(rep.tab) || b.getAttribute('onclick')?.includes(rep.tab));
+          if (tabBtn) tabBtn.click();
+        }
+      });
+    }
+  });
+
+  if (results.length === 0) {
+    dropdown.innerHTML = '<div style="padding:15px;font-size:12px;color:var(--muted);text-align:center">No matches found for "' + window.esc(query) + '"</div>';
+    return;
+  }
+
+  // Render search results HTML beautifully
+  dropdown.innerHTML = results.map((res, index) => {
+    const callbackName = 'gSearchCallback_' + index;
+    window[callbackName] = () => {
+      res.action();
+      window.hideGlobalSearchDropdown();
+      const input = document.getElementById('globalSearchInput');
+      if (input) input.value = '';
+    };
+    return `
+      <div onclick="window.${callbackName}()" 
+           onmouseenter="this.style.background='var(--bg3)'" 
+           onmouseleave="this.style.background='transparent'" 
+           style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:var(--r);cursor:pointer;margin-bottom:2px;transition:background 0.15s">
+        <div style="background:var(--bg3);width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--accent)">
+          <i class="fa ${res.icon}"></i>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:700;color:var(--text);display:flex;align-items:center;justify-content:space-between">
+            <span>${window.esc(res.title)}</span>
+            <span style="font-size:9px;background:var(--accent)1a;color:var(--accent);padding:2px 6px;border-radius:4px;font-weight:600">${res.type}</span>
+          </div>
+          <div style="font-size:10px;color:var(--muted);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${window.esc(res.subtitle)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+};

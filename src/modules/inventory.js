@@ -252,6 +252,7 @@ window.savePart = async function() {
       closeModal('partModal');
       window.filterInventory();
       window.renderDashboard();
+      if (typeof window.renderReports === 'function') window.renderReports();
     } catch(e) {
       window.showToast('Save failed: ' + e.message, 'error');
       console.error('savePart error:', e);
@@ -289,6 +290,7 @@ window.deletePart = async function(id) {
     await window.logActivity(`Part deleted: ${pn}`, 'delete');
     window.filterInventory();
     window.renderDashboard();
+    if (typeof window.renderReports === 'function') window.renderReports();
     window.showToast(`🗑️ Deleted: ${pn}`, 'warn');
   } catch(e) {
     window.showToast('Delete failed: ' + e.message, 'error');

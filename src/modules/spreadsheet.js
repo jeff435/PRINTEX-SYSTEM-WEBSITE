@@ -274,6 +274,31 @@
     });
   };
 
+  window.exportToPDF = function(elementId, filename) {
+    if (typeof html2pdf === 'undefined') {
+      window.showToast('PDF library still loading — please retry.', 'warn');
+      return;
+    }
+    const element = document.getElementById(elementId);
+    if (!element) {
+      window.showToast('Target element for PDF export not found', 'error');
+      return;
+    }
+    const opt = {
+      margin: [0.4, 0.4, 0.4, 0.4],
+      filename: filename,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape' }
+    };
+    window.showToast('Generating PDF Report...', 'info');
+    html2pdf().set(opt).from(element).save().then(() => {
+      window.showToast(`PDF downloaded: ${filename}`, 'success');
+    }).catch(err => {
+      window.showToast('PDF error: ' + err.message, 'error');
+    });
+  };
+
   // --- Page-specific export & print triggers ---
   window.exportInventoryExcel = function() {
     const data = (window.parts || []).filter(p => !p.isService);
