@@ -219,11 +219,20 @@ window.addEventListener('storage', async (e) => {
         window.submissions = await window.dbGet('submissions') || [];
         window.activityLog = await window.dbGet('activity') || [];
         
+        window.categories = await window.dbGet('categories') || [];
+        window.customers = await window.dbGet('customers') || [];
+        window.suppliers = await window.dbGet('suppliers') || [];
+        window.expenses = await window.dbGet('expenses') || [];
+        window.employees = await window.dbGet('employees') || [];
+        window.purchases = await window.dbGet('purchases') || [];
+        window.attendance = await window.dbGet('attendance') || [];
+        
         const settingsArr = await window.dbGet('settings') || [];
         window.settings = {};
         settingsArr.forEach(s => window.settings[s.key] = s.value);
         window.invoiceCounter = (await window.dbGet('settings','invoiceCounter'))?.value || 1;
 
+        if (typeof window.populateCategorySelects === 'function') window.populateCategorySelects();
         if (typeof window.applySettings === 'function') window.applySettings();
         if (typeof window.renderInventory === 'function') window.renderInventory();
         if (typeof window.renderDashboard === 'function') window.renderDashboard();
@@ -232,6 +241,21 @@ window.addEventListener('storage', async (e) => {
         if (typeof window.renderLineItems === 'function') window.renderLineItems();
         if (typeof window.renderAnalytics === 'function') window.renderAnalytics();
         if (typeof window.renderFreelancePage === 'function') window.renderFreelancePage();
+        
+        if (window.biz && typeof window.biz.init === 'function') {
+          await window.biz.init();
+          const currentActivePage = document.querySelector('.page.active')?.id?.replace('page-', '');
+          if (currentActivePage && ['customers', 'suppliers', 'expenses', 'employees', 'categories', 'purchases', 'attendance'].includes(currentActivePage)) {
+            if (currentActivePage === 'attendance' && typeof window.biz.filterAttendance === 'function') {
+              window.biz.filterAttendance();
+            } else {
+              const renderFnName = 'filter' + currentActivePage.charAt(0).toUpperCase() + currentActivePage.slice(1);
+              if (typeof window.biz[renderFnName] === 'function') {
+                window.biz[renderFnName]();
+              }
+            }
+          }
+        }
         
         window.showToast('🔄 Real-time data synchronized across Printex organization!', 'success');
       }
@@ -722,12 +746,6 @@ window.initializeFirestoreListeners = async function(userId) {
           }
         }
         if (typeof window.renderInventory === 'function') window.renderInventory();
-      } else if (store !== 'parts') {
-        // Clear IndexedDB for non-parts stores
-        try {
-          const tx = window.db.transaction(store, 'readwrite');
-          tx.objectStore(store).clear();
-        } catch(e) {}
       }
 
       if (store === 'invoices') { window.invoices = []; if (typeof window.renderInvoiceList === 'function') window.renderInvoiceList(); }
@@ -769,7 +787,7 @@ window.initializeFirestoreListeners = async function(userId) {
           // 1. Identify which local items to delete or keep
           // Safeguard: do not delete local parts if seeding is active, or if the server snapshot has fewer than 300 parts (incomplete snapshot)
           const isSeedingOrIncomplete = (store === 'parts' && firestoreData.length > 0 && firestoreData.length < 300);
-          if (!window._isSeeding && !isSeedingOrIncomplete) {
+          if (!window._isSeeding && !isSeedingOrIncomplete && firestoreData.length >= localData.length) {
             for (const localItem of localData) {
               const localId = store === 'settings' ? String(localItem.key || localItem.id) : String(localItem.id);
               
@@ -1889,50 +1907,53 @@ window.seedDefaultParts = async function() {
     const user = window.fAuth ? window.fAuth.currentUser : null;
     const userId = user ? user.uid : null;
     
-    console.log('[seedDefaultParts] Starting seed of ' + window.DEFAULT_PARTS.length + ' default parts...');
+    console.log('[seedDefaultParts] Starting seed of ' + window.DEFAULT_PARTS.length + ' default parts (merge mode)...');
     
-    // 1. Clear IndexedDB parts store directly (safe, local-only, no race condition)
+    // 1. Read existing parts to avoid overwriting user updates or deleting custom parts
+    let existingParts = [];
     if (window.db) {
-      await new Promise((resolve, reject) => {
-        const tx = window.db.transaction('parts', 'readwrite');
-        const req = tx.objectStore('parts').clear();
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
+      existingParts = await new Promise((resolve) => {
+        const tx = window.db.transaction('parts', 'readonly');
+        const req = tx.objectStore('parts').getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
       });
-      console.log('[seedDefaultParts] Cleared IndexedDB parts store.');
     }
-    
-    // 2. Write ALL default parts to Firestore using set() (full overwrite per doc).
-    //    CRITICAL FIX: We skip clearing the Firestore collection first to eliminate
-    //    the race condition where batch deletes and batch writes overlap while
-    //    snapshot listeners are active, causing the UI to see an intermediate
-    //    incomplete collection (e.g. 282 instead of expected parts).
-    //    Since every default part has a fixed, unique ID, set() will create or
-    //    fully overwrite each document without needing to delete first.
+
+    const existingPartsMap = new Map(existingParts.map(p => [String(p.id), p]));
+
+    // 2. Write default parts to Firestore using set({merge:true})
     if (userId && window.fDb) {
       const BATCH_LIMIT = 400;
-      let totalWritten = 0;
       for (let i = 0; i < window.DEFAULT_PARTS.length; i += BATCH_LIMIT) {
         const chunk = window.DEFAULT_PARTS.slice(i, i + BATCH_LIMIT);
         const writeBatch = window.fDb.batch();
         for (const dp of chunk) {
-          const part = { ...dp, image: null, ownerId: userId, _synced: true, _lastUpdated: Date.now() };
-          part.id = String(part.id);
+          const partId = String(dp.id);
+          const existing = existingPartsMap.get(partId);
+          const part = { 
+            ...dp, 
+            image: existing ? existing.image : null,
+            stock: existing ? existing.stock : dp.stock,
+            minStock: existing ? existing.minStock : dp.minStock,
+            priceKsh: existing ? (existing.priceKsh || existing.price) : dp.priceKsh,
+            ownerId: userId, 
+            _synced: true, 
+            _lastUpdated: Date.now() 
+          };
+          part.id = partId;
           const docRef = window.fDb.collection(`users/${userId}/parts`).doc(part.id);
-          writeBatch.set(docRef, part);
+          writeBatch.set(docRef, part, { merge: true });
         }
         try {
           await writeBatch.commit();
-          totalWritten += chunk.length;
-          console.log('[seedDefaultParts] Firestore batch ' + (Math.floor(i / BATCH_LIMIT) + 1) + ' committed: ' + chunk.length + ' parts');
         } catch(err) {
           console.error('[seedDefaultParts] Firestore batch commit failed:', err);
         }
       }
-      console.log('[seedDefaultParts] Wrote ' + totalWritten + '/' + window.DEFAULT_PARTS.length + ' parts to Firestore');
     }
     
-    // 3. Write to IndexedDB in a single transaction
+    // 3. Write default parts to IndexedDB
     if (window.db) {
       await new Promise((resolve, reject) => {
         const tx = window.db.transaction('parts', 'readwrite');
@@ -1941,30 +1962,29 @@ window.seedDefaultParts = async function() {
         tx.onerror = () => reject(tx.error);
         
         for (const dp of window.DEFAULT_PARTS) {
-          const part = { ...dp, image: null };
+          const partId = String(dp.id);
+          const existing = existingPartsMap.get(partId);
+          const part = { 
+            ...dp, 
+            image: existing ? existing.image : null,
+            stock: existing ? existing.stock : dp.stock,
+            minStock: existing ? existing.minStock : dp.minStock,
+            priceKsh: existing ? (existing.priceKsh || existing.price) : dp.priceKsh
+          };
           if (userId) {
             part.ownerId = userId;
             part._synced = true;
             part._lastUpdated = Date.now();
           }
-          part.id = String(part.id);
+          part.id = partId;
           os.put(part);
         }
       });
-      console.log('[seedDefaultParts] Wrote ' + window.DEFAULT_PARTS.length + ' parts to IndexedDB');
     }
     
-    // 4. Update memory
-    window.parts = window.DEFAULT_PARTS.map(dp => {
-      const part = { ...dp, image: null };
-      if (userId) {
-        part.ownerId = userId;
-        part._synced = true;
-        part._lastUpdated = Date.now();
-      }
-      part.id = String(part.id);
-      return part;
-    });
+    // 4. Update memory with all parts from IndexedDB (defaults + custom parts)
+    const allParts = await window.dbGet('parts') || [];
+    window.parts = allParts;
     
     // 5. Update local storage version keys
     const PARTS_VERSION = 'v4_august2025_308parts';
@@ -1974,7 +1994,7 @@ window.seedDefaultParts = async function() {
     }
     localStorage.setItem('printex_parts_version', PARTS_VERSION);
     
-    console.log('[seedDefaultParts] ✅ Complete: ' + window.parts.length + ' parts seeded successfully.');
+    console.log('[seedDefaultParts] ✅ Complete: ' + window.parts.length + ' parts loaded (including custom parts).');
   } finally {
     window._isSeeding = false;
   }
@@ -2030,9 +2050,31 @@ window.seedDefaultCategories = async function(userId) {
     { name: 'Consumables', code: 'L', icon: '📦', color: '#fcc419' }
   ];
 
-  console.log('[seedDefaultCategories] Seeding default categories...');
+  console.log('[seedDefaultCategories] Seeding default categories (merge mode)...');
 
-  // Write to IndexedDB
+  // Read current categories from IndexedDB first
+  let existingCats = [];
+  try {
+    existingCats = await window.dbGet('categories', undefined, true) || [];
+  } catch (e) {
+    console.warn('[seedDefaultCategories] Failed to read existing categories:', e);
+  }
+
+  const existingCodes = new Set(existingCats.map(c => String(c.code).toUpperCase()));
+  const existingIds = new Set(existingCats.map(c => String(c.id)));
+
+  // Filter defaultCats to only ones that are missing
+  const missingCats = defaultCats.filter(cat => 
+    !existingCodes.has(cat.code.toUpperCase()) && 
+    !existingIds.has('cat_' + cat.code.toLowerCase())
+  );
+
+  if (missingCats.length === 0) {
+    console.log('[seedDefaultCategories] No missing default categories to seed.');
+    return;
+  }
+
+  // Write missing to IndexedDB
   if (window.db) {
     await new Promise((resolve, reject) => {
       const tx = window.db.transaction('categories', 'readwrite');
@@ -2040,7 +2082,7 @@ window.seedDefaultCategories = async function(userId) {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
 
-      for (const cat of defaultCats) {
+      for (const cat of missingCats) {
         const item = { 
           ...cat, 
           id: 'cat_' + cat.code.toLowerCase(), 
@@ -2062,10 +2104,10 @@ window.seedDefaultCategories = async function(userId) {
     });
   }
 
-  // Write to Firestore
+  // Write missing to Firestore
   if (userId && window.fDb) {
     const writeBatch = window.fDb.batch();
-    for (const cat of defaultCats) {
+    for (const cat of missingCats) {
       const item = { 
         ...cat, 
         id: 'cat_' + cat.code.toLowerCase(), 
@@ -2080,7 +2122,7 @@ window.seedDefaultCategories = async function(userId) {
         _lastUpdated: Date.now()
       };
       const docRef = window.fDb.collection(`users/${userId}/categories`).doc(item.id);
-      writeBatch.set(docRef, item);
+      writeBatch.set(docRef, item, { merge: true });
     }
     await writeBatch.commit();
   }

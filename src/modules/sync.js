@@ -72,9 +72,10 @@ async function resolveConflictAndSave(store, serverItem) {
     return true;
   }
 
-  // If local item is marked as synced, we overwrite it safely
+  // If local item is marked as synced, we merge it safely
   if (localItem._synced) {
-    await window.dbPutNoSync(store, serverItem);
+    var merged = Object.assign({}, localItem, serverItem);
+    await window.dbPutNoSync(store, merged);
     return true;
   }
 
@@ -84,7 +85,8 @@ async function resolveConflictAndSave(store, serverItem) {
 
   if (serverTime > localTime) {
     console.log(`[Sync] Conflict resolved (Server wins): Overwriting local unsynced edits for ${store}/${id} (server: ${serverTime}, local: ${localTime})`);
-    await window.dbPutNoSync(store, serverItem);
+    var merged = Object.assign({}, localItem, serverItem);
+    await window.dbPutNoSync(store, merged);
     return true;
   } else {
     console.log(`[Sync] Conflict resolved (Local wins): Keeping local unsynced edits for ${store}/${id} (server: ${serverTime}, local: ${localTime})`);
@@ -207,6 +209,108 @@ window.updateSyncPanelUI = async function() {
   }
 };
 
+window.createAutomaticBackup = async function() {
+  try {
+    const backupDb = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('PrintexBackupDB', 1);
+      req.onupgradeneeded = e => {
+        const d = e.target.result;
+        const stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases', 'attendance'];
+        stores.forEach(s => {
+          if (!d.objectStoreNames.contains(s)) {
+            const keyPath = s === 'settings' ? 'key' : 'id';
+            d.createObjectStore(s, {keyPath: keyPath});
+          }
+        });
+      };
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = () => reject(req.error);
+    });
+
+    const stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases', 'attendance'];
+    
+    for (var s = 0; s < stores.length; s++) {
+      const store = stores[s];
+      const localData = await new Promise((resolve) => {
+        if (!window.db) return resolve([]);
+        const tx = window.db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      });
+
+      await new Promise((resolve, reject) => {
+        const tx = backupDb.transaction(store, 'readwrite');
+        const os = tx.objectStore(store);
+        const clearReq = os.clear();
+        clearReq.onsuccess = () => {
+          if (localData.length === 0) {
+            resolve();
+            return;
+          }
+          for (var i = 0; i < localData.length; i++) {
+            os.put(localData[i]);
+          }
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        };
+        clearReq.onerror = () => reject(clearReq.error);
+      });
+    }
+    backupDb.close();
+    console.log('[Backup] Automatic pre-sync backup created successfully.');
+    return true;
+  } catch (err) {
+    console.error('[Backup] Failed to create pre-sync backup:', err);
+    return false;
+  }
+};
+
+window.restoreAutomaticBackup = async function() {
+  try {
+    const backupDb = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('PrintexBackupDB', 1);
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = () => reject(req.error);
+    });
+
+    const stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases', 'attendance'];
+    
+    for (var s = 0; s < stores.length; s++) {
+      const store = stores[s];
+      const backupData = await new Promise((resolve) => {
+        const tx = backupDb.transaction(store, 'readonly');
+        const req = tx.objectStore(store).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      });
+
+      if (backupData.length === 0) continue;
+
+      await new Promise((resolve, reject) => {
+        if (!window.db) return reject(new Error('Main DB not open'));
+        const tx = window.db.transaction(store, 'readwrite');
+        const os = tx.objectStore(store);
+        const clearReq = os.clear();
+        clearReq.onsuccess = () => {
+          for (var i = 0; i < backupData.length; i++) {
+            os.put(backupData[i]);
+          }
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        };
+        clearReq.onerror = () => reject(clearReq.error);
+      });
+    }
+    backupDb.close();
+    console.log('[Backup] Automatic restore from backup completed.');
+    return true;
+  } catch (err) {
+    console.error('[Backup] Failed to restore from backup:', err);
+    return false;
+  }
+};
+
 window.syncData = async function() {
   if (window.isSyncing) return;
   if (!window.db) return;
@@ -220,6 +324,9 @@ window.syncData = async function() {
 
   window.isSyncing = true;
   window.updateSyncStatus('syncing');
+
+  // Create pre-sync backup
+  await window.createAutomaticBackup();
 
   try {
     var stores = ['parts', 'invoices', 'settings', 'activity', 'submissions', 'categories', 'customers', 'suppliers', 'expenses', 'employees', 'purchases', 'attendance'];
@@ -362,10 +469,7 @@ window.syncData = async function() {
           state.highestModSeq = 0;
           window.saveMailboxState(store, state);
           
-          if (store !== 'parts') {
-            var tx = window.db.transaction(store, 'readwrite');
-            tx.objectStore(store).clear();
-          }
+          // Resetting timestamps only, never clearing the local store.
           hasNewData = true;
         }
       }
@@ -484,7 +588,8 @@ window.syncData = async function() {
       window.showToast('🔄 Real-time data synchronized successfully!', 'success');
     }
   } catch(err) {
-    console.error('[Sync] Sync failure:', err);
+    console.error('[Sync] Sync failure, restoring automatic backup:', err);
+    await window.restoreAutomaticBackup();
     window.updateSyncStatus('offline');
   } finally {
     window.isSyncing = false;

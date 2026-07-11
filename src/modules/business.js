@@ -632,13 +632,17 @@
 
     if (editingId) {
       record.id = editingId;
-      const arr = getArr(store);
-      const idx = arr.findIndex(x => x.id === editingId);
-      if (idx !== -1) arr[idx] = { ...arr[idx], ...record };
-      else arr.push(record);
     } else {
-      record.id = store.substring(0, 3) + '_' + Date.now();
-      getArr(store).push(record);
+      const prefix = {
+        categories: 'cat',
+        customers: 'cust',
+        suppliers: 'sup',
+        expenses: 'exp',
+        employees: 'emp',
+        purchases: 'pur',
+        attendance: 'att'
+      }[store] || store.substring(0, 3);
+      record.id = prefix + '_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
     }
 
     try {
@@ -669,7 +673,6 @@
           updatedAt: Date.now()
         };
         await window.dbPut('expenses', expenseRecord);
-        expenses.push(expenseRecord);
 
         // 3. Update supplier statistics
         const supplierObj = suppliers.find(s => s.name === record.supplier);
@@ -686,24 +689,22 @@
         if (typeof window.renderDashboard === 'function') window.renderDashboard();
       }
 
+      // Reload all collections from IndexedDB to guarantee local memory has exact correct data
+      await loadAll();
+
       const modalId = { customers: 'custModal', suppliers: 'supModal', expenses: 'expModal', employees: 'empModal', categories: 'catMgmtModal', purchases: 'purModal' }[store];
       closeModal(modalId);
-      // If categories changed, refresh global window.categories and update all dropdowns + charts
-      if (store === 'categories') {
-        categories = (await window.dbGet('categories')) || [];
-        window.categories = categories.filter(c => !c._deleted);
-        if (typeof window.populateCategorySelects === 'function') {
-          window.populateCategorySelects(); // updates fCat, catFilter, any data-category-select, and inventory chart
-        }
-        // Also refresh inventory chart and dashboard KPIs
-        if (typeof window.renderInventory === 'function') window.renderInventory();
-        if (typeof window.renderDashboard === 'function') window.renderDashboard();
-      }
+      
       refreshPage(store);
       if (typeof window.renderDashboard === 'function') window.renderDashboard();
       if (typeof window.renderReports === 'function') window.renderReports();
       window.showToast && window.showToast('✅ Saved successfully!', 'success');
-      window.syncData && window.syncData();
+      
+      if (typeof window.triggerDelayedSync === 'function') {
+        window.triggerDelayedSync();
+      } else if (window.syncData) {
+        window.syncData();
+      }
     } catch (e) {
       console.error('[Business] Save failed:', e);
       window.showToast && window.showToast('❌ Save failed: ' + e.message, 'danger');
@@ -723,22 +724,20 @@
     item._deleted = true;
     try {
       await window.dbPut(store, item);
-      // If categories changed, refresh global window.categories and update all dropdowns + charts
-      if (store === 'categories') {
-        categories = (await window.dbGet('categories')) || [];
-        window.categories = categories.filter(c => !c._deleted);
-        if (typeof window.populateCategorySelects === 'function') {
-          window.populateCategorySelects(); // updates fCat, catFilter, inventory chart
-        }
-        // Also refresh inventory chart and dashboard KPIs
-        if (typeof window.renderInventory === 'function') window.renderInventory();
-        if (typeof window.renderDashboard === 'function') window.renderDashboard();
-      }
+      
+      // Reload all collections from IndexedDB to guarantee local memory has exact correct data
+      await loadAll();
+      
       refreshPage(store);
       if (typeof window.renderDashboard === 'function') window.renderDashboard();
       if (typeof window.renderReports === 'function') window.renderReports();
       window.showToast && window.showToast(`🗑️ ${label} deleted.`, 'success');
-      window.syncData && window.syncData();
+      
+      if (typeof window.triggerDelayedSync === 'function') {
+        window.triggerDelayedSync();
+      } else if (window.syncData) {
+        window.syncData();
+      }
     } catch (e) {
       item._deleted = false; // rollback
       window.showToast && window.showToast('❌ Delete failed: ' + e.message, 'danger');
